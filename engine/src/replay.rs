@@ -1,13 +1,15 @@
-//! 按 `relative_us` 将数据帧发往目标（UDP / 串口）。
+//! 按 `relative_us` 将数据帧发往目标（UDP / 串口 / TCP）。
 
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::Instant;
+use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
 use crate::clock::SessionClock;
 use crate::fcap::{ChannelType, PacketKind, SessionReader};
 use crate::serial::{SerialConfig, SerialPort};
+use crate::tcp::{accept_until, connect, listen, write_all, TcpConfig, TcpRole};
 use crate::udp::{bind_sender, send_to};
 
 pub struct ReplayOptions {
@@ -134,6 +136,108 @@ pub fn replay_serial_with_port(
         SessionClock::sleep_until_relative(base, pkt.relative_us);
         port.write_all(&pkt.payload)?;
         sent += 1;
+    }
+
+    eprintln!("重放结束：发送 {sent} 帧");
+    Ok(sent)
+}
+
+pub struct TcpReplayOptions {
+    pub in_path: std::path::PathBuf,
+    /// 重放侧地址：角色取反后，server→bind，client→connect。
+    pub endpoint: SocketAddr,
+    pub poll_timeout: Duration,
+}
+
+/// 按会话内录制角色取反后建立连接，并把录到的 RX 数据按时间轴写回对端。
+pub fn replay_tcp_from_file(
+    opts: &TcpReplayOptions,
+    stop: &AtomicBool,
+) -> io::Result<u64> {
+    let mut reader = SessionReader::open(&opts.in_path)?;
+    if !reader.header().is_finalized() {
+        eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
+    }
+
+    let recorded = reader
+        .channels()
+        .iter()
+        .find(|c| c.channel_type == ChannelType::Tcp)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "会话中无 TCP 通道")
+        })?;
+    let recorded_cfg = TcpConfig::from_config_json(&recorded.config_json)?;
+    let play_role = recorded_cfg.role.invert();
+
+    eprintln!(
+        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us）",
+        opts.in_path.display(),
+        play_role.as_str(),
+        opts.endpoint,
+        recorded_cfg.role.as_str()
+    );
+
+    let base = Instant::now();
+    let mut sent = 0u64;
+    let mut stream = None;
+
+    reader.rewind_packets()?;
+    while let Some(pkt) = reader.next_packet()? {
+        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+            break;
+        }
+        let ch = reader
+            .channels()
+            .iter()
+            .find(|c| c.channel_index == pkt.channel_index);
+        if ch.map(|c| c.channel_type) != Some(ChannelType::Tcp) {
+            continue;
+        }
+
+        SessionClock::sleep_until_relative(base, pkt.relative_us);
+
+        match pkt.kind {
+            PacketKind::TcpConnect => {
+                let s = match play_role {
+                    TcpRole::Server => {
+                        let listener = listen(opts.endpoint)?;
+                        let local = listener.local_addr().unwrap_or(opts.endpoint);
+                        eprintln!("TCP 重放等待上位机接入：{local}");
+                        match accept_until(&listener, stop, opts.poll_timeout)? {
+                            Some((s, peer)) => {
+                                eprintln!("TCP 已接入：{peer}");
+                                s
+                            }
+                            None => {
+                                eprintln!("重放中止：等待连接时被停止");
+                                break;
+                            }
+                        }
+                    }
+                    TcpRole::Client => {
+                        eprintln!("TCP 重放连接：{}", opts.endpoint);
+                        connect(opts.endpoint, opts.poll_timeout)?
+                    }
+                };
+                stream = Some(s);
+            }
+            PacketKind::Data => {
+                // 录制 RX = 设备→工具；重放演设备时写回对端（上位机）
+                if pkt.direction != 0 {
+                    continue;
+                }
+                let Some(ref s) = stream else {
+                    eprintln!("警告：未连接就遇到数据帧，已跳过");
+                    continue;
+                };
+                write_all(s, &pkt.payload)?;
+                sent += 1;
+            }
+            PacketKind::TcpDisconnect => {
+                stream = None;
+            }
+            PacketKind::Marker => {}
+        }
     }
 
     eprintln!("重放结束：发送 {sent} 帧");

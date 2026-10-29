@@ -1,19 +1,20 @@
 //! FieldReplay 引擎 CLI：`record` / `replay` / `self-check`。
 
-use std::io::{self, Write};
-use std::net::SocketAddr;
+use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use fieldreplay_engine::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter,
 };
 use fieldreplay_engine::{
-    record_serial_with_port, record_udp_to_file, replay_serial_with_port, replay_udp_from_file,
-    Parity, RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions,
-    SerialReplayOptions,
+    record_serial_with_port, record_tcp_to_file, record_udp_to_file, replay_serial_with_port,
+    replay_tcp_from_file, replay_udp_from_file, Parity, RecordOptions, ReplayOptions, SerialConfig,
+    SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions,
+    TcpReplayOptions, TcpRole,
 };
 
 fn main() {
@@ -45,18 +46,22 @@ fn run() -> io::Result<()> {
 fn print_help() {
     eprintln!(
         "\
-FieldReplay 引擎（E2：UDP + 串口 录 → .fcap → 按时间轴重放）
+FieldReplay 引擎（E3：UDP + 串口 + TCP 录 → .fcap → 按时间轴重放）
 
 用法:
   fieldreplay-engine record  --bind <ip:port> --out <file.fcap> [--duration <秒>]
   fieldreplay-engine record  --port <COMx> [--baud <n>] [--parity none|odd|even] \\
                              [--data-bits 8] [--stop-bits 1] --out <file.fcap> [--duration <秒>]
+  fieldreplay-engine record  --tcp-role <server|client> --tcp <ip:port> --out <file.fcap> \\
+                             [--duration <秒>]
   fieldreplay-engine replay  --in <file.fcap> --target <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
+  fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
---bind 与 --port 互斥；replay 的 --target 与 --port 互斥。
+--bind / --port / --tcp 互斥；replay 的 --target / --port / --tcp 互斥。
+TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 "
     );
 }
@@ -64,6 +69,8 @@ record：无 --duration 时按 Enter 停止并收尾写盘。
 fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut bind: Option<SocketAddr> = None;
     let mut port_name: Option<String> = None;
+    let mut tcp_endpoint: Option<SocketAddr> = None;
+    let mut tcp_role: Option<TcpRole> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
     let mut stop_bits: u8 = 1;
@@ -85,6 +92,20 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 port_name = Some(
                     args.next()
                         .ok_or_else(|| err_arg("--port 需要串口名"))?,
+                );
+            }
+            "--tcp" => {
+                let v = args.next().ok_or_else(|| err_arg("--tcp 需要地址"))?;
+                tcp_endpoint = Some(v.parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("tcp: {e}"))
+                })?);
+            }
+            "--tcp-role" => {
+                let v = args
+                    .next()
+                    .ok_or_else(|| err_arg("--tcp-role 需要 server|client"))?;
+                tcp_role = Some(
+                    TcpRole::parse(&v).ok_or_else(|| err_arg("tcp-role 须为 server|client"))?,
                 );
             }
             "--baud" => {
@@ -133,8 +154,16 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     }
 
     let out = out.ok_or_else(|| err_arg("缺少 --out"))?;
-    if bind.is_some() && port_name.is_some() {
-        return Err(err_arg("--bind 与 --port 不能同时使用"));
+    let modes = [
+        bind.is_some(),
+        port_name.is_some(),
+        tcp_endpoint.is_some() || tcp_role.is_some(),
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count();
+    if modes > 1 {
+        return Err(err_arg("--bind / --port / --tcp 不能同时使用"));
     }
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -162,7 +191,26 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         return Ok(());
     }
 
-    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind 或 --port"))?;
+    if let Some(endpoint) = tcp_endpoint {
+        let role = tcp_role.ok_or_else(|| err_arg("TCP 录制需要 --tcp-role server|client"))?;
+        let config = TcpConfig::new(role, endpoint.ip().to_string(), endpoint.port());
+        let opts = TcpRecordOptions {
+            config,
+            out_path: out,
+            channel_name: format!("TCP-{}-{}", role.as_str(), endpoint.port()),
+            session_title: Some(format!("record-tcp-{}", endpoint.port())),
+            max_duration: duration,
+            poll_timeout: Duration::from_millis(200),
+        };
+        let n = record_tcp_to_file(&opts, &stop)?;
+        println!("ok packets={n}");
+        return Ok(());
+    }
+    if tcp_role.is_some() {
+        return Err(err_arg("TCP 录制需要 --tcp <ip:port>"));
+    }
+
+    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind、--port 或 --tcp"))?;
     let config = SerialConfig {
         port_name: port_name.clone(),
         baud,
@@ -186,6 +234,7 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
 fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut input: Option<PathBuf> = None;
     let mut target: Option<SocketAddr> = None;
+    let mut tcp_endpoint: Option<SocketAddr> = None;
     let mut port_name: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -206,6 +255,12 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                     .ok_or_else(|| err_arg("--target 需要地址"))?;
                 target = Some(v.parse().map_err(|e| {
                     io::Error::new(io::ErrorKind::InvalidInput, format!("target: {e}"))
+                })?);
+            }
+            "--tcp" => {
+                let v = args.next().ok_or_else(|| err_arg("--tcp 需要地址"))?;
+                tcp_endpoint = Some(v.parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("tcp: {e}"))
                 })?);
             }
             "--port" => {
@@ -247,8 +302,12 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     }
 
     let input = input.ok_or_else(|| err_arg("缺少 --in"))?;
-    if target.is_some() && port_name.is_some() {
-        return Err(err_arg("--target 与 --port 不能同时使用"));
+    let modes = [target.is_some(), port_name.is_some(), tcp_endpoint.is_some()]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+    if modes > 1 {
+        return Err(err_arg("--target / --port / --tcp 不能同时使用"));
     }
 
     if let Some(target) = target {
@@ -262,7 +321,19 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         return Ok(());
     }
 
-    let port_name = port_name.ok_or_else(|| err_arg("缺少 --target 或 --port"))?;
+    if let Some(endpoint) = tcp_endpoint {
+        let stop = Arc::new(AtomicBool::new(false));
+        let opts = TcpReplayOptions {
+            in_path: input,
+            endpoint,
+            poll_timeout: Duration::from_millis(200),
+        };
+        let n = replay_tcp_from_file(&opts, &stop)?;
+        println!("ok sent={n}");
+        return Ok(());
+    }
+
+    let port_name = port_name.ok_or_else(|| err_arg("缺少 --target、--port 或 --tcp"))?;
     let config = SerialConfig {
         port_name,
         baud,
@@ -279,7 +350,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     Ok(())
 }
 
-/// 写 UDP/串口帧往返校验；UDP 本机环回；串口内存环回录放。
+/// 写 UDP/串口/TCP 帧往返校验；本机环回录放。
 fn cmd_self_check() -> io::Result<()> {
     print!("self-check: fcap 往返… ");
     let _ = io::stdout().flush();
@@ -303,6 +374,12 @@ fn cmd_self_check() -> io::Result<()> {
             name: "SERIAL-self".into(),
             config_json: SerialConfig::new("COM3", 115_200).to_config_json(),
         },
+        ChannelEntry {
+            channel_index: 2,
+            channel_type: ChannelType::Tcp,
+            name: "TCP-self".into(),
+            config_json: TcpConfig::new(TcpRole::Server, "127.0.0.1", 9000).to_config_json(),
+        },
     ];
     let mut w = SessionWriter::create(&path, 1_700_000_000_000_000, &channels, None)?;
     w.append_packet(&PacketRecord {
@@ -323,15 +400,31 @@ fn cmd_self_check() -> io::Result<()> {
         aux: Vec::new(),
         payload: b"serial-beta".to_vec(),
     })?;
+    w.append_packet(&PacketRecord {
+        relative_us: 3000,
+        channel_index: 2,
+        kind: PacketKind::TcpConnect,
+        direction: 0,
+        flags: 0,
+        aux: b"127.0.0.1:1".to_vec(),
+        payload: Vec::new(),
+    })?;
+    w.append_packet(&PacketRecord {
+        relative_us: 3500,
+        channel_index: 2,
+        kind: PacketKind::Data,
+        direction: 0,
+        flags: 0,
+        aux: Vec::new(),
+        payload: b"tcp-gamma".to_vec(),
+    })?;
     w.finalize()?;
 
     let mut r = SessionReader::open(&path)?;
     let pkts = r.read_all_packets()?;
-    assert_eq!(pkts.len(), 2, "帧数");
-    assert_eq!(r.channels()[1].channel_type, ChannelType::Serial);
-    assert_eq!(pkts[0].payload, b"alpha");
-    assert_eq!(pkts[1].payload, b"serial-beta");
-    assert_eq!(pkts[1].channel_index, 1);
+    assert_eq!(pkts.len(), 4, "帧数");
+    assert_eq!(r.channels()[2].channel_type, ChannelType::Tcp);
+    assert_eq!(pkts[3].payload, b"tcp-gamma");
     println!("ok");
 
     print!("self-check: UDP 录放环回… ");
@@ -344,6 +437,16 @@ fn cmd_self_check() -> io::Result<()> {
     serial_loopback_check()?;
     println!("ok");
 
+    print!("self-check: TCP server 录 / client 放… ");
+    let _ = io::stdout().flush();
+    tcp_server_record_loopback()?;
+    println!("ok");
+
+    print!("self-check: TCP client 录 / server 放… ");
+    let _ = io::stdout().flush();
+    tcp_client_record_loopback()?;
+    println!("ok");
+
     let _ = std::fs::remove_file(&path);
     println!("self-check 全部通过");
     Ok(())
@@ -352,7 +455,6 @@ fn cmd_self_check() -> io::Result<()> {
 fn udp_loopback_check() -> io::Result<()> {
     use std::net::UdpSocket;
     use std::thread;
-    use std::time::Instant;
 
     let rec_addr = {
         let s = UdpSocket::bind("127.0.0.1:0")?;
@@ -440,7 +542,6 @@ fn udp_loopback_check() -> io::Result<()> {
 
 fn serial_loopback_check() -> io::Result<()> {
     use std::thread;
-    use std::time::Instant;
 
     let (end_rec, end_inj) = SerialPort::open_loopback_pair(Duration::from_millis(50));
     let fcap = std::env::temp_dir().join(format!(
@@ -517,6 +618,227 @@ fn serial_loopback_check() -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("串口载荷不一致: {got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// 录制角色 server → 重放取反为 client：连上监听端并写出 RX 载荷。
+fn tcp_server_record_loopback() -> io::Result<()> {
+    use std::thread;
+
+    let rec_addr = {
+        let l = TcpListener::bind("127.0.0.1:0")?;
+        l.local_addr()?
+    };
+
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_tcp_srv_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+
+    let recorder = thread::spawn(move || {
+        let opts = TcpRecordOptions {
+            config: TcpConfig::new(TcpRole::Server, rec_addr.ip().to_string(), rec_addr.port()),
+            out_path: fcap2,
+            channel_name: "TCP-srv".into(),
+            session_title: Some("tcp-srv".into()),
+            max_duration: Some(Duration::from_secs(3)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        record_tcp_to_file(&opts, &stop_rec)
+    });
+
+    thread::sleep(Duration::from_millis(120));
+    {
+        let mut peer = TcpStream::connect(rec_addr)?;
+        peer.set_nodelay(true)?;
+        peer.write_all(b"ping-1")?;
+        thread::sleep(Duration::from_millis(40));
+        peer.write_all(b"ping-2")?;
+        thread::sleep(Duration::from_millis(80));
+        // 关闭写端，录制侧读到 EOF
+        drop(peer);
+    }
+    thread::sleep(Duration::from_millis(100));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder.join().map_err(|_| err_arg("TCP server 录制 panic"))??;
+    // connect + ≥1 data + disconnect；TCP 可能把两包粘成一帧
+    if n < 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("TCP server 录制帧数不足: {n}"),
+        ));
+    }
+
+    let listen = TcpListener::bind("127.0.0.1:0")?;
+    let play_addr = listen.local_addr()?;
+    let acceptor = thread::spawn(move || -> io::Result<Vec<u8>> {
+        listen.set_nonblocking(false)?;
+        let (mut stream, _) = listen.accept()?;
+        stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+        let mut out = Vec::new();
+        let mut buf = [0u8; 2048];
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while out.len() < 12 && Instant::now() < deadline {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    });
+
+    thread::sleep(Duration::from_millis(50));
+    let stop_play = Arc::new(AtomicBool::new(false));
+    let sent = replay_tcp_from_file(
+        &TcpReplayOptions {
+            in_path: fcap.clone(),
+            endpoint: play_addr,
+            poll_timeout: Duration::from_millis(50),
+        },
+        &stop_play,
+    )?;
+    let got = acceptor
+        .join()
+        .map_err(|_| err_arg("TCP 接收线程 panic"))??;
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 1 || got != b"ping-1ping-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("TCP server→client 重放失败: sent={sent} got={got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// 录制角色 client → 重放取反为 server：等待上位机接入后写出 RX 载荷。
+fn tcp_client_record_loopback() -> io::Result<()> {
+    use std::thread;
+
+    let device = TcpListener::bind("127.0.0.1:0")?;
+    let device_addr = device.local_addr()?;
+
+    // 设备侧：accept 后灌两包再关
+    let feeder = thread::spawn(move || -> io::Result<()> {
+        device.set_nonblocking(false)?;
+        let (mut stream, _) = device.accept()?;
+        stream.set_nodelay(true)?;
+        stream.write_all(b"ping-1")?;
+        thread::sleep(Duration::from_millis(40));
+        stream.write_all(b"ping-2")?;
+        thread::sleep(Duration::from_millis(40));
+        Ok(())
+    });
+
+    thread::sleep(Duration::from_millis(40));
+
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_tcp_cli_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+
+    let recorder = thread::spawn(move || {
+        let opts = TcpRecordOptions {
+            config: TcpConfig::new(
+                TcpRole::Client,
+                device_addr.ip().to_string(),
+                device_addr.port(),
+            ),
+            out_path: fcap2,
+            channel_name: "TCP-cli".into(),
+            session_title: Some("tcp-cli".into()),
+            max_duration: Some(Duration::from_secs(3)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        record_tcp_to_file(&opts, &stop_rec)
+    });
+
+    feeder.join().map_err(|_| err_arg("TCP 设备灌包 panic"))??;
+    thread::sleep(Duration::from_millis(150));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder.join().map_err(|_| err_arg("TCP client 录制 panic"))??;
+    if n < 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("TCP client 录制帧数不足: {n}"),
+        ));
+    }
+
+    // 重放为 server：先占端口，再起重放，上位机（本测）连入收包
+    let play_probe = TcpListener::bind("127.0.0.1:0")?;
+    let play_addr = play_probe.local_addr()?;
+    drop(play_probe);
+
+    let stop_play = Arc::new(AtomicBool::new(false));
+    let fcap_play = fcap.clone();
+    let replayer = thread::spawn(move || {
+        replay_tcp_from_file(
+            &TcpReplayOptions {
+                in_path: fcap_play,
+                endpoint: play_addr,
+                poll_timeout: Duration::from_millis(50),
+            },
+            &stop_play,
+        )
+    });
+
+    // 等重放 listen 起来
+    let mut stream = None;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        match TcpStream::connect(play_addr) {
+            Ok(s) => {
+                stream = Some(s);
+                break;
+            }
+            Err(_) => thread::sleep(Duration::from_millis(30)),
+        }
+    }
+    let mut stream = stream.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::TimedOut, "无法连上 TCP 重放 server")
+    })?;
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+
+    let mut got = Vec::new();
+    let mut buf = [0u8; 2048];
+    let read_deadline = Instant::now() + Duration::from_secs(3);
+    while got.len() < 12 && Instant::now() < read_deadline {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => got.extend_from_slice(&buf[..n]),
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    let sent = replayer.join().map_err(|_| err_arg("TCP server 重放 panic"))??;
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 1 || got != b"ping-1ping-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("TCP client→server 重放失败: sent={sent} got={got:?}"),
         ));
     }
     Ok(())

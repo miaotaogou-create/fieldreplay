@@ -3,7 +3,7 @@ name = "fieldreplay-engine"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "FieldReplay 原生录放引擎：UDP/串口录制 / .fcap 写读 / 按时间轴重放"
+description = "FieldReplay 原生录放引擎：UDP/串口/TCP 录制 / .fcap 写读 / 按时间轴重放"
 readme = "README.md"
 
 [lib]
