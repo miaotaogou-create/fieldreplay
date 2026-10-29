@@ -17,14 +17,14 @@
 | 仓库骨架 / docs / 进度本 | 已就绪 |
 | **`ui/` 界面** | U8 通过；引擎已连时录制/重演走控制面，离线仍可 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
-| `engine/` 原生引擎 | **E5 已收口**；**E6a**：`serve --ui-dir` 同端口静态 UI + WS |
+| `engine/` 原生引擎 | **E5 已收口**；`serve --ui-dir` 同端口静态 UI + WS |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
 | 二进制 `.fcap` 读写 / 导出 | **已落地**（写读 + `session.export` 回传二进制） |
-| 打包单入口 | **进行中 E6**：E6a–E6c 完成；E6d 双击手测待做 |
+| 打包单入口 | **E6 已收口**（E6a–E6d） |
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
-| 绿色目录 | **E6c 已落地**：`tools/pack_green.bat` → `pack/FieldReplay/`；冒烟通过 |
+| 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E6d** 双击手测验收 + README/进度本收口 E6 |
+| **下一步** | 可选 G1/G3 抛光；或补需求里真实 IO 端到端勾选；**E7 视频后置** |
 
 ## 已确认决策
 
@@ -118,24 +118,40 @@ fieldreplay/
 | E5b | 录制页去 mock 发包：经控制 API 启停真实 UDP/串口/TCP/MQTT 录制，预览窗收引擎推送 | [x] | 2026-10-29：`record.start/stop` + `record.packet` 推送；录制钩子；UI 引擎已连时走真实启停；离线仍可 mock；self-check UDP 环回通过 |
 | E5c | 重演页去 mock 播放：经控制 API 载入后真实按时间轴重放（目标映射） | [x] | 2026-10-29：`replay.start/stop` + `replay.progress`/`done`；四通道可中断；UI 引擎已连时走真重放（1x，无循环/倍速）；self-check UDP 环回通过 |
 | E5d | 导出写真实二进制 `.fcap`；mock 样本仅作引擎未连接时的离线演示；收口 E5 | [x] | 2026-10-29：`session.export` 回传 FCAP 字节；UI 已连→真二进制下载；未连→JSON 演示包；self-check 往返通过 |
-| E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [~] | 拆 E6a–E6d；壳选型见决策 15 |
+| E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [x] | 2026-10-29：E6a–E6d 全部完成；见下方 E6d 清单 |
 | E6a | 引擎 `serve --ui-dir` 同端口托管 `ui/dist`；GET/WS 分流；自检 | [x] | 2026-10-29：`http_static`；CLI `--ui-dir`；self-check HTTP+WS 同端口通过 |
 | E6b | 薄壳 WebView2 窗口加载本机 UI；启动时拉起/内嵌引擎 serve | [x] | 2026-10-29：`shell/` + wry/tao；拉起 `serve --ui-dir`；Job 连带回收；`cargo run -- --smoke` 通过 |
 | E6c | 绿色目录打包脚本（主 EXE + ui/dist + 引擎） | [x] | 2026-10-29：`tools/pack_green.ps1`（bat 入口）；产物 `pack/FieldReplay/`；脚本内 `--smoke` 通过 |
-| E6d | 双击手测验收 + README/进度本收口 E6 | [ ] ← **当前下一步** | |
-| E7 | （后置）视频通道 | [ ] | |
+| E6d | 双击手测验收 + README/进度本收口 E6 | [x] | 2026-10-29：**通过**（见下方 E6d 清单）；README/需求/架构已收口 |
+| E7 | （后置）视频通道 | [ ] ← **可选下一步** | |
+
+### E6d 手测清单（2026-10-29，`pack\FieldReplay\fieldreplay.exe`）
+
+对应验收：`docs/requirements/20261029-mvp.md`「Windows 下通过双击主程序进入录/放界面」；交付形态见架构「打包」。
+
+| 项 | 结果 | 说明 |
+|----|------|------|
+| `fieldreplay.exe --smoke` | 通过 | 引擎路径/UI 目录解析正确；HTTP 探活 OK |
+| 启动主程序 → 本机窗口 | 通过 | 可见窗口标题 `FieldReplay`；子进程 `fieldreplay-engine` 一并拉起 |
+| 同端口静态 UI | 通过 | `http://127.0.0.1:17890/` HTTP 200；壳与引擎同目录布局 |
+| WebSocket 控制面 | 通过 | `cmd:ping` / `cmd:status` 正常 |
+| 顶栏四 Tab（录制 / 重演 / 报文 / 对接说明） | 通过 | 引擎已连文案：`开始引擎录制` / `引擎重演` |
+| 空会话：重演播放条禁用 | 通过 | |
+| 「离线演示样本」→ 报文有帧 / 重演可播 | 通过 | 会话标题与故障点可见 |
+| README / 进度本 / 需求勾选收口 | 通过 | 本轮文档已更新 |
+| **残留（不阻塞 E6）** | — | U8 缺口 G1（重演页 Qt 口吻）、G3（清空后 sessionTitle）仍在；真实 IO 端到端勾选见需求前 4 条 |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E6d**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7**，后置；或用户点名的抛光/验收）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / E6a–E6c 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / **打包 E6** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
-5. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
-6. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
-7. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
-8. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
-9. **E6d**：双击 `pack\FieldReplay\fieldreplay.exe` 手测四页主路径；收口 E6 / README
+5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
+6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
+7. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
+8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
+9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
 
 ## 决策记录（追加）
 
@@ -162,3 +178,4 @@ fieldreplay/
 | 2026-10-29 | E6a：`serve --ui-dir`；同端口 GET 静态 / WS 升级分流 | 交付壳与开发期均可加载同一 UI 构建产物 |
 | 2026-10-29 | E6b：独立 `shell/` crate（wry+tao）；子进程引擎 + Job 回收；`--smoke` 不开窗自检 | 双击出本机窗口；热路径仍在引擎 |
 | 2026-10-29 | E6c：`tools/pack_green` 组装旁路布局（主 EXE + 引擎 + ui/dist）；产物不进 git | 与 paths.rs 默认查找一致；交付可拷整目录 |
+| 2026-10-29 | E6d：绿色包双击手测通过；E6 收口 | 窗口标题 FieldReplay；引擎+UI/WS 同端口；需求「双击进界面」勾选 |
