@@ -15,17 +15,13 @@ import {
   RotateCcw,
   StepForward,
   StepBack,
-  Sliders,
-  Radio,
   Upload,
   AlertTriangle,
-  Send,
   Zap,
   CheckCircle2,
   Cpu,
-  Clock,
-  Shuffle,
-  FileCheck,
+  Activity,
+  ExternalLink,
 } from 'lucide-react';
 
 interface DevReplayerViewProps {
@@ -93,12 +89,21 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<any>(null);
+  const hasPackets = packets.length > 0;
 
-  const totalDurationUs =
-    packets.length > 0 ? packets[packets.length - 1].timestampUs : 1000;
-  const currentPacket = packets[currentIndex] || packets[0];
+  const totalDurationUs = hasPackets ? packets[packets.length - 1].timestampUs : 0;
+  const safeIndex = hasPackets ? Math.min(currentIndex, packets.length - 1) : 0;
+  const currentPacket = hasPackets ? packets[safeIndex] : undefined;
   const currentTimeUs = currentPacket?.timestampUs || 0;
-  const progressPercent = totalDurationUs > 0 ? (currentTimeUs / totalDurationUs) * 100 : 0;
+  const progressPercent =
+    totalDurationUs > 0 ? Math.min(100, (currentTimeUs / totalDurationUs) * 100) : 0;
+
+  // 会话包变更时复位播放头与推送日志，避免越界
+  useEffect(() => {
+    setIsPlaying(false);
+    setCurrentIndex(0);
+    setDispatchedPackets([]);
+  }, [sessionMetadata.sessionTitle, packets.length]);
 
   // Playback Loop Engine
   useEffect(() => {
@@ -134,19 +139,17 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           }
         }
 
-        // Add to dispatched log
-        if (status !== 'dropped') {
-          setDispatchedPackets((old) => [
-            {
-              id: pkt.id,
-              time: new Date().toLocaleTimeString() + '.' + (Date.now() % 1000).toString().padStart(3, '0'),
-              channel: pkt.channelName,
-              status,
-              bytes: pkt.length,
-            },
-            ...old.slice(0, 39),
-          ]);
-        }
+        // 丢包也记入日志，便于核对故障注入效果
+        setDispatchedPackets((old) => [
+          {
+            id: pkt.id,
+            time: new Date().toLocaleTimeString() + '.' + (Date.now() % 1000).toString().padStart(3, '0'),
+            channel: pkt.channelName,
+            status,
+            bytes: pkt.length,
+          },
+          ...old.slice(0, 39),
+        ]);
 
         return nextIdx;
       });
@@ -158,6 +161,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   }, [isPlaying, replaySpeed, isLooping, packets, replayConfig.faultInjection]);
 
   const handleTogglePlay = () => {
+    if (!hasPackets) return;
     if (currentIndex >= packets.length - 1) {
       setCurrentIndex(0);
     }
@@ -170,16 +174,19 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   };
 
   const handleStepForward = () => {
+    if (!hasPackets) return;
     setIsPlaying(false);
     setCurrentIndex((prev) => Math.min(packets.length - 1, prev + 1));
   };
 
   const handleStepBack = () => {
+    if (!hasPackets) return;
     setIsPlaying(false);
     setCurrentIndex((prev) => Math.max(0, prev - 1));
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!hasPackets || totalDurationUs <= 0) return;
     const val = parseFloat(e.target.value);
     const targetUs = (val / 100) * totalDurationUs;
     // Find closest packet index
@@ -193,6 +200,11 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       }
     }
     setCurrentIndex(closestIdx);
+  };
+
+  const handleSpeedChange = (s: number) => {
+    setReplaySpeed(s);
+    setReplayConfig((cfg) => ({ ...cfg, speed: s }));
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,14 +300,36 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
       {/* Master Replayer Media Console */}
       <div className="bg-slate-900 text-white rounded-xl p-6 shadow-md border border-slate-800 space-y-5">
+        {!hasPackets && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-amber-500/10 border border-amber-400/30 rounded-lg">
+            <div className="flex items-start gap-2 text-xs text-amber-100">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <p>
+                当前会话无数据帧，播放条已禁用。请先在「现场录制」导出包，或点击上方「载入其他 .fcap 包」。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="shrink-0 px-3 py-1.5 text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg"
+            >
+              载入 .fcap
+            </button>
+          </div>
+        )}
+
         {/* Scrubber Timeline */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs font-mono">
             <span className="text-slate-400">
-              当前回放时间: <strong className="text-sky-400">{formatMicroseconds(currentTimeUs)}</strong>
+              当前回放时间:{' '}
+              <strong className="text-sky-400">{formatMicroseconds(currentTimeUs)}</strong>
             </span>
             <span className="text-slate-500">
-              总时长: {formatMicroseconds(totalDurationUs)} (第 {currentIndex + 1} / {packets.length} 帧)
+              总时长: {formatMicroseconds(totalDurationUs)}{' '}
+              {hasPackets
+                ? `(第 ${safeIndex + 1} / ${packets.length} 帧)`
+                : '(暂无帧)'}
             </span>
           </div>
 
@@ -308,20 +342,22 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               step="0.05"
               value={progressPercent}
               onChange={handleSeek}
-              className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-500 hover:accent-sky-400"
+              disabled={!hasPackets}
+              className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none accent-sky-500 hover:accent-sky-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:accent-sky-500"
             />
             {/* Anomaly Marker Indicator if present in packet */}
-            {packets.map((p, idx) =>
-              p.hasError ? (
-                <div
-                  key={p.id}
-                  onClick={() => setCurrentIndex(idx)}
-                  title={`故障点: ${p.errorReason || '异常'}`}
-                  className="absolute top-0 w-1.5 h-3.5 bg-rose-500 cursor-pointer -translate-x-1/2 hover:scale-125 transition-transform"
-                  style={{ left: `${(p.timestampUs / totalDurationUs) * 100}%` }}
-                />
-              ) : null
-            )}
+            {totalDurationUs > 0 &&
+              packets.map((p, idx) =>
+                p.hasError ? (
+                  <div
+                    key={p.id}
+                    onClick={() => setCurrentIndex(idx)}
+                    title={`故障点: ${p.errorReason || '异常'}`}
+                    className="absolute top-0 w-1.5 h-3.5 bg-rose-500 cursor-pointer -translate-x-1/2 hover:scale-125 transition-transform"
+                    style={{ left: `${(p.timestampUs / totalDurationUs) * 100}%` }}
+                  />
+                ) : null
+              )}
           </div>
         </div>
 
@@ -330,27 +366,33 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           {/* Main Transport Buttons */}
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleReset}
+              disabled={!hasPackets}
               title="重置到起点 00:00"
-              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
             >
               <RotateCcw className="w-4 h-4" />
             </button>
 
             <button
+              type="button"
               onClick={handleStepBack}
-              title="逐帧单步后退 (⏮️)"
-              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              disabled={!hasPackets}
+              title="逐帧单步后退"
+              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
             >
               <StepBack className="w-4 h-4" />
             </button>
 
             <button
+              type="button"
               onClick={handleTogglePlay}
-              className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-xs transition-all shadow-md active:scale-98 ${
+              disabled={!hasPackets}
+              className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-semibold text-xs transition-all shadow-md active:scale-98 disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100 ${
                 isPlaying
                   ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-                  : 'bg-sky-600 hover:bg-sky-500 text-white'
+                  : 'bg-sky-600 hover:bg-sky-500 text-white disabled:hover:bg-sky-600'
               }`}
             >
               {isPlaying ? (
@@ -367,15 +409,22 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             </button>
 
             <button
+              type="button"
               onClick={handleStepForward}
-              title="逐帧单步前进 (⏭️ 微秒级步进)"
-              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              disabled={!hasPackets}
+              title="逐帧单步前进（微秒级步进）"
+              className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
             >
               <StepForward className="w-4 h-4" />
             </button>
 
             <button
-              onClick={() => setIsLooping(!isLooping)}
+              type="button"
+              onClick={() => {
+                const next = !isLooping;
+                setIsLooping(next);
+                setReplayConfig((cfg) => ({ ...cfg, loop: next }));
+              }}
               className={`px-3 py-2 text-xs rounded-lg border transition-colors ${
                 isLooping
                   ? 'bg-slate-800 text-sky-400 border-sky-500/50'
@@ -392,7 +441,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             {[0.1, 0.5, 1.0, 2.0, 5.0, 10.0].map((s) => (
               <button
                 key={s}
-                onClick={() => setReplaySpeed(s)}
+                type="button"
+                onClick={() => handleSpeedChange(s)}
                 className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors ${
                   replaySpeed === s
                     ? 'bg-sky-600 text-white shadow-xs'
@@ -474,9 +524,16 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           {/* Tab 1: TCP Detailed Handler */}
           {activeTargetTab === 'tcp' && (
             <div className="p-3.5 bg-sky-50/60 rounded-lg border border-sky-200/80 space-y-3 text-xs">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-slate-900">TCP 重演连接策略</span>
-                <span className="text-[11px] text-sky-700 font-mono">Qt QTcpSocket 对接</span>
+                <div className="flex items-center gap-2">
+                  {replayConfig.tcp.mode === 'tool_is_server' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-sky-100 text-sky-800 border border-sky-200">
+                      已连接客户端 {replayConfig.tcp.connectedClientsCount}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-sky-700 font-mono">上位机套接字对接</span>
+                </div>
               </div>
 
               {/* Mode switcher */}
@@ -597,9 +654,30 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           {/* Tab 2: MQTT Detailed Handler */}
           {activeTargetTab === 'mqtt' && (
             <div className="p-3.5 bg-teal-50/60 rounded-lg border border-teal-200/80 space-y-3 text-xs">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-slate-900">MQTT 物联网重演策略</span>
-                <span className="text-[11px] text-teal-700 font-mono">Qt qtmqtt 对接</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        mqtt: {
+                          ...replayConfig.mqtt,
+                          connectedToBroker: !replayConfig.mqtt.connectedToBroker,
+                        },
+                      })
+                    }
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium border transition-colors ${
+                      replayConfig.mqtt.connectedToBroker
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {replayConfig.mqtt.connectedToBroker ? '● Broker 已连接' : '○ Broker 未连接'}
+                  </button>
+                  <span className="text-[11px] text-teal-700 font-mono">MQTT 客户端对接</span>
+                </div>
               </div>
 
               {/* Mode switcher */}
@@ -678,18 +756,39 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-600 text-[11px] shrink-0">主题前缀改写 (可选):</span>
+                  <input
+                    type="text"
+                    value={replayConfig.mqtt.topicPrefix}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        mqtt: { ...replayConfig.mqtt, topicPrefix: e.target.value },
+                      })
+                    }
+                    placeholder="留空=原 Topic；如 lab/"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
+                  />
+                </div>
+
                 <div className="text-[11px] text-slate-600 space-y-1">
                   <div>
                     · <strong>主题重放 (Topic Replay):</strong> 严格按录制时序，向原始主题（如{' '}
-                    <code className="text-teal-700 font-mono">factory/line3/servo/telemetry</code>）发布；
+                    <code className="text-teal-700 font-mono">factory/line3/servo/telemetry</code>
+                    ）发布
+                    {replayConfig.mqtt.topicPrefix
+                      ? `；当前前缀「${replayConfig.mqtt.topicPrefix}」会拼到 Topic 前`
+                      : ''}
+                    ；
                   </div>
                   <div>
                     · <strong>QoS 完整保真:</strong> 原包的 QoS 0 / 1 / 2 及 Retain 标志完全保留；
                   </div>
                   <div>
-                    · <strong>Qt 上位机零改动:</strong> Qt 上位机订阅原有通配符（如{' '}
+                    · <strong>上位机零改动:</strong> 订阅原有通配符（如{' '}
                     <code className="text-teal-700 font-mono">factory/+/telemetry</code>
-                    ），准时收到 <code>QMqttMessage</code> 触发！
+                    ），即可准时收到消息触发。
                   </div>
                 </div>
               </div>
@@ -762,6 +861,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                       onChange={(e) =>
                         setReplayConfig({
                           ...replayConfig,
+                          virtualComPort: e.target.value,
                           serial: { ...replayConfig.serial, selectedPort: e.target.value },
                         })
                       }
@@ -883,6 +983,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                         onClick={() =>
                           setReplayConfig({
                             ...replayConfig,
+                            virtualComPort: preset.send,
                             serial: {
                               ...replayConfig.serial,
                               selectedPort: preset.send,
@@ -1004,16 +1105,29 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Detailed Inspector of Current Replay Frame */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-xs">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 gap-2">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
-              当前重播数据帧深度检查 (Frame #{currentPacket?.id})
+              当前重播数据帧深度检查
+              {currentPacket ? ` (Frame #${currentPacket.id})` : ''}
             </h3>
-            {currentPacket?.hasError && (
-              <span className="text-[11px] text-rose-600 font-semibold flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                {currentPacket.errorReason}
-              </span>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {currentPacket?.hasError && (
+                <span className="text-[11px] text-rose-600 font-semibold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {currentPacket.errorReason}
+                </span>
+              )}
+              {currentPacket && (
+                <button
+                  type="button"
+                  onClick={() => onSelectPacketForInspection(currentPacket)}
+                  className="text-[11px] text-sky-700 hover:text-sky-900 font-medium flex items-center gap-1 px-2 py-1 rounded border border-sky-200 bg-sky-50 hover:bg-sky-100"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  报文页查看
+                </button>
+              )}
+            </div>
           </div>
 
           {currentPacket ? (
@@ -1042,6 +1156,16 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   </strong>
                 </div>
               </div>
+
+              {currentPacket.mqttTopic && (
+                <div className="p-2.5 bg-teal-50/70 border border-teal-100 rounded-lg font-sans text-[11px] text-teal-900">
+                  <span className="font-semibold">MQTT Topic: </span>
+                  <code className="font-mono">{currentPacket.mqttTopic}</code>
+                  {typeof currentPacket.mqttQoS === 'number' && (
+                    <span className="ml-2 text-teal-700">QoS {currentPacket.mqttQoS}</span>
+                  )}
+                </div>
+              )}
 
               {/* Hex Dump & ASCII */}
               <div>
@@ -1076,29 +1200,39 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               )}
             </div>
           ) : (
-            <div className="text-center py-10 text-slate-400 text-xs">暂无数据帧</div>
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-2">
+              <Activity className="w-8 h-8 text-slate-300 stroke-[1.5]" />
+              <p className="text-xs">暂无数据帧可检查，请先载入 .fcap 或从录制页导出会话</p>
+            </div>
           )}
         </div>
 
-        {/* Right 1 Col: Live Dispatched Packets to Qt */}
+        {/* Right 1 Col: Live Dispatched Packets to host */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-xs">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
               实时发往上位机日志
             </h3>
             <span className="text-[11px] text-slate-400 font-mono">
-              已推 {dispatchedPackets.length} 帧
+              已记 {dispatchedPackets.length} 条
+              {dispatchedPackets.filter((d) => d.status === 'dropped').length > 0 &&
+                ` · 丢 ${dispatchedPackets.filter((d) => d.status === 'dropped').length}`}
             </span>
           </div>
 
           <div className="h-72 overflow-y-auto divide-y divide-slate-100 font-mono text-[11px]">
             {dispatchedPackets.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 font-sans text-xs">
-                点击“高保真重演”开始推送数据给上位机
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 font-sans text-xs space-y-2 py-12">
+                <Activity className="w-7 h-7 text-slate-300 stroke-[1.5]" />
+                <p>
+                  {hasPackets
+                    ? '点击「高保真重演」开始按时间轴推送'
+                    : '无数据可推送，请先载入会话包'}
+                </p>
               </div>
             ) : (
               dispatchedPackets.map((dp, i) => (
-                <div key={i} className="py-2 flex items-center justify-between text-slate-700">
+                <div key={`${dp.id}-${i}`} className="py-2 flex items-center justify-between text-slate-700">
                   <div className="truncate mr-2">
                     <span className="text-slate-400">[{dp.time.slice(3)}]</span>{' '}
                     <span className="font-semibold text-slate-900">#{dp.id}</span>{' '}
@@ -1107,6 +1241,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   <div>
                     {dp.status === 'ok' && (
                       <span className="text-emerald-600 font-semibold">{dp.bytes}B TX</span>
+                    )}
+                    {dp.status === 'dropped' && (
+                      <span className="text-rose-600 font-semibold">DROPPED</span>
                     )}
                     {dp.status === 'corrupted' && (
                       <span className="text-amber-600 font-semibold">CRC_ERR</span>
