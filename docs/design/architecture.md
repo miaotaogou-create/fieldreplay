@@ -89,6 +89,7 @@ UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接
 - **体验**：普通桌面客户端——双击主程序（单入口 EXE）出现本机窗口；**不**打开系统浏览器看界面。
 - 允许：绿色目录内含主 EXE、引擎、内嵌 UI 资源、依赖 DLL（不强制磁盘上物理「唯一一个文件」，但用户感知是「点一个程序就开」）。
 - **壳选型（E6）**：引擎 `serve --ui-dir <ui/dist>` 同端口提供 HTTP 静态页 + 既有 WebSocket 控制面；薄壳（`shell/`，WebView2 / wry）启动时拉起引擎子进程，本机窗口加载 `http://127.0.0.1:17890/`，不把录放热路径迁入 Tauri。
+- **窗体**：无系统边框（`with_decorations(false)`）；UI 自定义标题栏经 `window.ipc.postMessage`（minimize / maximize / close / drag_window）控制壳窗口。
 - **E6b**：`fieldreplay.exe`（壳）查找旁路/`engine/target` 下的 `fieldreplay-engine` 与 `ui/dist`；Windows Job 在壳退出时回收引擎；`--smoke` 仅 HTTP 探活。
 - **E6c**：`tools/pack_green.bat` 产出绿色目录 `pack/FieldReplay/`（主 EXE + 引擎旁路 + `ui/dist`），脚本内 `--smoke` 探活。
 - **E6d**：双击绿色包主程序验收通过（本机窗口标题 `FieldReplay`；引擎子进程 + 同端口 UI/WS）；阶段 E6 收口。

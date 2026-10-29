@@ -1,6 +1,6 @@
 # FieldReplay 界面预览
 
-本目录是 FieldReplay 的 React 界面壳（Vite + Tailwind），用于本地预览录制 / 重演 / 报文 / 对接说明四页。
+本目录是 FieldReplay 的 React 界面壳（Vite + Tailwind），用于本地预览录制 / 重演 / 报文三页；正式交付由薄壳 WebView2 加载（自定义标题栏）。
 
 **E5a**：可连接本机引擎控制面，载入真实二进制 `.fcap`；未连引擎时仍可用「离线演示样本」与 JSON 演示包。
 

@@ -15,10 +15,10 @@ import {
   generateServoAlarmPreset,
 } from './utils/mockFieldData';
 import { Header } from './components/Header';
+import { DesktopTitleBar } from './components/DesktopTitleBar';
 import { FieldRecorderView } from './components/FieldRecorderView';
 import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
-import { QtArchitectureGuide } from './components/QtArchitectureGuide';
 import { channelToEngineConfig, pickRecordChannel } from './engine/channelConfig';
 import { defaultEngineUrl, EngineClient } from './engine/client';
 import {
@@ -32,7 +32,9 @@ import {
   mapEngineSession,
   metadataToFcapMeta,
 } from './engine/sessionMap';
+import { hasShellIpc, postShellCommand } from './shell/windowControls';
 import { ReplayConfig } from './types/recorder';
+import { AlertTriangle, Download } from 'lucide-react';
 
 const TOAST_MS = 3500;
 
@@ -50,6 +52,8 @@ export default function App() {
     durationUs: number;
   } | null>(null);
   const [engineReplayDoneSeq, setEngineReplayDoneSeq] = useState(0);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
 
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,6 +75,46 @@ export default function App() {
     }, TOAST_MS);
   };
   toastFnRef.current = showToast;
+
+  const handleMinimize = () => {
+    if (postShellCommand('minimize')) return;
+    showToast('开发预览无系统最小化；请用绿色包主程序');
+  };
+
+  const handleToggleMaximize = () => {
+    if (postShellCommand('maximize')) {
+      setIsMaximized((v) => !v);
+      return;
+    }
+    // 浏览器预览：用 Fullscreen 近似最大化
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsMaximized(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsMaximized(false);
+    }
+  };
+
+  const handleConfirmClose = () => {
+    setShowCloseModal(false);
+    if (postShellCommand('close')) return;
+    showToast('开发预览无法退出壳进程；请关闭浏览器标签');
+  };
+
+  const handleRequestClose = () => {
+    if (recordedPackets.length > 0) {
+      setShowCloseModal(true);
+      return;
+    }
+    handleConfirmClose();
+  };
+
+  useEffect(() => {
+    const onFs = () => setIsMaximized(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => document.removeEventListener('fullscreenchange', onFs);
+  }, []);
 
   useEffect(() => {
     const client = new EngineClient(defaultEngineUrl());
@@ -358,7 +402,14 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans antialiased">
+    <div className="h-screen overflow-hidden bg-slate-100/70 text-slate-900 flex flex-col font-sans antialiased">
+      <DesktopTitleBar
+        isMaximized={isMaximized}
+        onToggleMaximize={handleToggleMaximize}
+        onMinimize={handleMinimize}
+        onRequestClose={handleRequestClose}
+      />
+
       <Header
         currentTab={currentTab}
         onTabChange={setCurrentTab}
@@ -377,7 +428,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 pb-16">
+      <main className="flex-1 min-h-0 overflow-auto pb-4">
         {currentTab === 'record' && (
           <FieldRecorderView
             channels={channels}
@@ -413,15 +464,66 @@ export default function App() {
         {currentTab === 'packets' && (
           <PacketsView packets={recordedPackets} onSelectPacket={() => {}} />
         )}
-
-        {currentTab === 'qt_guide' && <QtArchitectureGuide />}
       </main>
 
-      <footer className="py-4 border-t border-slate-200 text-center text-xs text-slate-500 bg-white">
+      <footer className="py-3 border-t border-slate-200 text-center text-xs text-slate-500 bg-white shrink-0">
         <span>FieldReplay · 工业上位机现场数据录制与高保真重演工作台</span>
         <span className="mx-2">·</span>
         <span>微秒时基无漂移 · 上位机改指向即可对接</span>
+        {!hasShellIpc() && (
+          <>
+            <span className="mx-2">·</span>
+            <span className="text-amber-600">浏览器预览</span>
+          </>
+        )}
       </footer>
+
+      {showCloseModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">退出 FieldReplay 确认</h3>
+                <p className="text-xs text-slate-500 mt-0.5">当前缓冲区尚有未关闭会话数据</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              缓冲区共{' '}
+              <strong className="font-mono text-slate-900">{recordedPackets.length}</strong>{' '}
+              帧。若尚未导出，建议先保存再退出。
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowCloseModal(false)}
+                className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 rounded-lg"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmClose}
+                className="px-3.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+              >
+                直接退出
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleExportSession(sessionMetadata).finally(handleConfirmClose);
+                }}
+                className="px-4 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>保存并退出</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

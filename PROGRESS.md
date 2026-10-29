@@ -15,7 +15,7 @@
 | 架构选型 | 已确认：原生录放引擎 + 现有 React UI 壳 + 打包为单入口应用 |
 | 引擎语言 | **Rust**（仅 std）；见决策 14 |
 | 仓库骨架 / docs / 进度本 | 已就绪 |
-| **`ui/` 界面** | U8 通过；引擎已连时录制/重演走控制面，离线仍可 mock；`npm run dev` 仅开发预览 |
+| **`ui/` 界面** | 三 Tab（录制/重演/报文）；自定义标题栏；引擎已连走控制面，离线仍可 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
 | `engine/` 原生引擎 | **E5 已收口**；`serve --ui-dir` 同端口静态 UI + WS |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
@@ -25,6 +25,7 @@
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
 | **下一步** | 可选 G1/G3 抛光；或补需求里真实 IO 端到端勾选；**E7 视频后置** |
+| IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏（对照 Downloads 原型） |
 
 ## 已确认决策
 
@@ -179,3 +180,4 @@ fieldreplay/
 | 2026-10-29 | E6b：独立 `shell/` crate（wry+tao）；子进程引擎 + Job 回收；`--smoke` 不开窗自检 | 双击出本机窗口；热路径仍在引擎 |
 | 2026-10-29 | E6c：`tools/pack_green` 组装旁路布局（主 EXE + 引擎 + ui/dist）；产物不进 git | 与 paths.rs 默认查找一致；交付可拷整目录 |
 | 2026-10-29 | E6d：绿色包双击手测通过；E6 收口 | 窗口标题 FieldReplay；引擎+UI/WS 同端口；需求「双击进界面」勾选 |
+| 2026-10-29 | 去掉「对接说明」Tab；壳无系统边框，UI 自定义标题栏经 IPC 控窗 | 上位机只是重演接收方，不必单独 Tab；窗体对齐 Downloads 原型 |

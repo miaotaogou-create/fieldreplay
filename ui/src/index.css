@@ -1,1 +1,13 @@
 @import "tailwindcss";
+
+/* WebView2 无边框：标题栏拖动区（WebView2 123+ non-client region） */
+.fr-titlebar-drag {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+.fr-titlebar-no-drag,
+.fr-titlebar-no-drag * {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}

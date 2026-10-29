@@ -114,4 +114,4 @@ export interface ReplayConfig {
   };
 }
 
-export type AppTab = 'record' | 'replay' | 'packets' | 'qt_guide';
+export type AppTab = 'record' | 'replay' | 'packets';
