@@ -1,0 +1,19 @@
+[package]
+name = "fieldreplay-shell"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "FieldReplay 薄壳：WebView2 窗口 + 拉起本机引擎 serve"
+readme = "README.md"
+
+[[bin]]
+name = "fieldreplay"
+path = "src/main.rs"
+
+[dependencies]
+tao = "0.34"
+wry = "0.53"
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -17,10 +17,11 @@ Thumbs.db
 .vscode/
 *.user
 
-# 引擎本地构建产物
+# 引擎 / 壳本地构建产物
 engine/build/
 engine/out/
 engine/target/
+shell/target/
 *.obj
 *.pdb
 *.exe

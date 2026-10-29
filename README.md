@@ -6,7 +6,19 @@
 - **实验室**：按时间轴将录制包灌回真实上位机  
 - **交付**：Windows 单入口客户端（双击 EXE 出窗口，不靠系统浏览器）
 
-当前：引擎 **E6a**（录放 + `serve` WS；可选 `--ui-dir` 托管静态 UI）。下一步 **E6b** 薄壳 WebView2 窗口，见 `PROGRESS.md`。
+当前：薄壳 **E6b** 已可用（`shell/` WebView2 拉起引擎）。下一步 **E6c** 绿色目录打包，见 `PROGRESS.md`。
+
+## 本机窗口（接近交付）
+
+```bat
+cd engine && cargo build
+cd ..\ui && npm run build
+cd ..\shell
+cargo run -- --smoke
+cargo run
+```
+
+双击/运行 `shell\target\debug\fieldreplay.exe` 出本机窗口（需 WebView2 Runtime）。`--smoke` 只探活、不开窗。
 
 ## 开发期预览（非交付形态）
 
@@ -25,13 +37,13 @@ npm run dev
 浏览器打开 `http://localhost:3000`。
 
 ```bat
-REM 方式 2：引擎托管已构建 UI（更接近交付）
+REM 方式 2：引擎托管已构建 UI（无壳）
 cd ui && npm run build
 cd ..\engine
 cargo run -- serve --ui-dir ..\ui\dist
 ```
 
-浏览器打开 `http://127.0.0.1:17890/`。正式交付为双击 EXE 出本机窗口（E6b+），不经系统浏览器。
+浏览器打开 `http://127.0.0.1:17890/`。正式交付为双击壳 EXE 出本机窗口，不经系统浏览器。
 
 ## 引擎
 

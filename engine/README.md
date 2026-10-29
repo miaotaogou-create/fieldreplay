@@ -1,6 +1,6 @@
 # FieldReplay 引擎
 
-原生录放热路径（Rust，仅标准库）。当前完成 **E6a**：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。
+原生录放热路径（Rust，仅标准库）。当前完成 **E6a**：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。桌面窗口见仓库 `shell/`（E6b）。
 
 格式契约：[`../docs/design/fcap-format.md`](../docs/design/fcap-format.md)。
 

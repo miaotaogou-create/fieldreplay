@@ -20,9 +20,10 @@
 | `engine/` 原生引擎 | **E5 已收口**；**E6a**：`serve --ui-dir` 同端口静态 UI + WS |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
 | 二进制 `.fcap` 读写 / 导出 | **已落地**（写读 + `session.export` 回传二进制） |
-| 打包单入口 | **进行中 E6**：壳选型已定；E6a 完成；E6b 薄壳窗口待做 |
+| 打包单入口 | **进行中 E6**：E6a/E6b 完成；E6c 绿色目录打包待做 |
+| `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E6b** 薄壳 WebView2 窗口（双击出本机窗口，加载引擎托管的 UI） |
+| **下一步** | **E6c** 绿色目录打包脚本（主 EXE + ui/dist + 引擎） |
 
 ## 已确认决策
 
@@ -51,8 +52,9 @@ fieldreplay/
   LICENSE
   docs/requirements/       ← 需求与验收
   docs/design/             ← 架构与格式
-  ui/                      ← React 界面（当前主线）
-  engine/                  ← 原生录放引擎（E4：UDP+串口+TCP+MQTT）
+  ui/                      ← React 界面
+  engine/                  ← 原生录放引擎
+  shell/                   ← 薄壳 WebView2（E6b；双击入口）
   tests/
 ```
 
@@ -117,21 +119,21 @@ fieldreplay/
 | E5d | 导出写真实二进制 `.fcap`；mock 样本仅作引擎未连接时的离线演示；收口 E5 | [x] | 2026-10-29：`session.export` 回传 FCAP 字节；UI 已连→真二进制下载；未连→JSON 演示包；self-check 往返通过 |
 | E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [~] | 拆 E6a–E6d；壳选型见决策 15 |
 | E6a | 引擎 `serve --ui-dir` 同端口托管 `ui/dist`；GET/WS 分流；自检 | [x] | 2026-10-29：`http_static`；CLI `--ui-dir`；self-check HTTP+WS 同端口通过 |
-| E6b | 薄壳 WebView2 窗口加载本机 UI；启动时拉起/内嵌引擎 serve | [ ] ← **当前下一步** | |
-| E6c | 绿色目录打包脚本（主 EXE + ui/dist + 引擎） | [ ] | |
+| E6b | 薄壳 WebView2 窗口加载本机 UI；启动时拉起/内嵌引擎 serve | [x] | 2026-10-29：`shell/` + wry/tao；拉起 `serve --ui-dir`；Job 连带回收；`cargo run -- --smoke` 通过 |
+| E6c | 绿色目录打包脚本（主 EXE + ui/dist + 引擎） | [ ] ← **当前下一步** | |
 | E6d | 双击手测验收 + README/进度本收口 E6 | [ ] | |
 | E7 | （后置）视频通道 | [ ] | |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E6b**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E6c**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / E6a 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / E6a / E6b 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
 6. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
-7. **E5d 手测**：引擎连上 → 录一段或载入 `.fcap` → 录制页导出 → 下载文件应用十六进制查看器应见 `FCAP` 魔数；未连引擎时导出仍为 JSON 演示包
-8. **E6b**：薄壳 WebView2（建议独立 `shell/` 或 `desktop/` crate + wry）；启动引擎 `serve --ui-dir` 并开本机窗口；勿整仓 Tauri
+7. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
+8. **E6c**：绿色目录打包（主 `fieldreplay.exe` + 引擎 + `ui/dist`）；脚本收口，勿整仓 Tauri
 
 ## 决策记录（追加）
 
@@ -156,3 +158,4 @@ fieldreplay/
 | 2026-10-29 | E5d：`session.export` 回传二进制 b64；已连引擎禁止伪装 JSON 为正式 `.fcap`；离线仍可 JSON 演示 | 与载入侧对称；浏览器无法直读引擎 temp 路径 |
 | 2026-10-29 | E6 壳：引擎托管静态 UI + 薄壳 WebView2；不整仓 Tauri；拆 E6a–E6d | 保留 std 引擎与 WS；壳只负责窗口；E6a 先通静态托管 |
 | 2026-10-29 | E6a：`serve --ui-dir`；同端口 GET 静态 / WS 升级分流 | 交付壳与开发期均可加载同一 UI 构建产物 |
+| 2026-10-29 | E6b：独立 `shell/` crate（wry+tao）；子进程引擎 + Job 回收；`--smoke` 不开窗自检 | 双击出本机窗口；热路径仍在引擎 |
