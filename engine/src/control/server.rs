@@ -1,7 +1,7 @@
-//! 本地 WebSocket 控制面：ping / status / session.* / record.start|stop。
+//! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.*。
 
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::path::Path;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -15,6 +15,7 @@ use super::dto::{session_to_json, status_json};
 use super::hub::PushHub;
 use super::json_util::{err_result, escape_str, extract_str, ok_result};
 use super::live::{handle_record_start, handle_record_stop};
+use super::replay_live::{handle_replay_start, handle_replay_stop};
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
     accept_websocket, read_text_frame, write_text_frame as write_text_frame_server,
@@ -98,13 +99,20 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             ),
         ),
         "status" => match state.lock() {
-            Ok(g) => ok_result(&id, &status_json(&g)),
+            Ok(mut g) => {
+                g.reap_finished_replay();
+                ok_result(&id, &status_json(&g))
+            }
             Err(_) => err_result(&id, "状态锁损坏"),
         },
         "session.clear" => match state.lock() {
             Ok(mut g) => {
+                g.reap_finished_replay();
                 if g.recording.is_some() {
                     return err_result(&id, "录制中无法清空会话，请先 record.stop");
+                }
+                if g.replaying.is_some() {
+                    return err_result(&id, "重放中无法清空会话，请先 replay.stop");
                 }
                 g.session = None;
                 ok_result(&id, "{\"cleared\":true}")
@@ -132,7 +140,13 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             }
         }
         "record.start" => match state.lock() {
-            Ok(mut g) => handle_record_start(&id, msg, &mut g.recording, hub),
+            Ok(mut g) => {
+                g.reap_finished_replay();
+                if g.replaying.is_some() {
+                    return err_result(&id, "重放中无法录制，请先 replay.stop");
+                }
+                handle_record_start(&id, msg, &mut g.recording, hub)
+            }
             Err(_) => err_result(&id, "状态锁损坏"),
         },
         "record.stop" => {
@@ -151,6 +165,26 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             }
             reply
         }
+        "replay.start" => match state.lock() {
+            Ok(mut g) => {
+                g.reap_finished_replay();
+                handle_replay_start(&id, msg, &mut g, hub)
+            }
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "replay.stop" => {
+            let mut replaying = match state.lock() {
+                Ok(mut g) => {
+                    g.reap_finished_replay();
+                    g.replaying.take()
+                }
+                Err(_) => return err_result(&id, "状态锁损坏"),
+            };
+            let reply = handle_replay_stop(&id, &mut replaying);
+            // stop 已 take 并 join；槽位保持空
+            let _ = replaying;
+            reply
+        }
         other => err_result(&id, &format!("未知 cmd: {other}")),
     }
 }
@@ -163,8 +197,12 @@ fn store_and_reply(
     let result = session_to_json(&loaded);
     match state.lock() {
         Ok(mut g) => {
+            g.reap_finished_replay();
             if g.recording.is_some() {
                 return err_result(id, "录制中无法载入会话");
+            }
+            if g.replaying.is_some() {
+                return err_result(id, "重放中无法载入会话");
             }
             g.session = Some(loaded);
             ok_result(id, &result)
@@ -204,7 +242,7 @@ fn load_from_b64(b64s: &str) -> Result<LoadedSession, String> {
     })
 }
 
-/// 自检：临时目录写一小包 → serve 环回 ping + session.open + record.start/stop。
+/// 自检：临时目录写一小包 → serve 环回 ping + session.open + record.* + replay.*。
 pub fn self_check_control() -> io::Result<()> {
     let dir = std::env::temp_dir().join("fieldreplay_e5a_ctrl");
     let _ = std::fs::create_dir_all(&dir);
@@ -225,6 +263,15 @@ pub fn self_check_control() -> io::Result<()> {
             flags: 0,
             aux: b"127.0.0.1:1".to_vec(),
             payload: b"hello-e5a".to_vec(),
+        })?;
+        w.append_packet(&PacketRecord {
+            relative_us: 50_000,
+            channel_index: 0,
+            kind: PacketKind::Data,
+            direction: 0,
+            flags: 0,
+            aux: b"127.0.0.1:1".to_vec(),
+            payload: b"hello-e5c".to_vec(),
         })?;
         w.finalize()?;
     }
@@ -276,14 +323,133 @@ pub fn self_check_control() -> io::Result<()> {
 
     eprintln!("  控制面 WebSocket ping + session.open：通过");
 
-    // E5b：UDP 环回录制 + 预览推送
+    // E5c：先测重放（会话仍是 sample.fcap），再测录制（会覆盖内存会话）
+    self_check_replay_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     Ok(())
 }
 
-fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
-    use std::net::UdpSocket;
+fn self_check_replay_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let recv = UdpSocket::bind("127.0.0.1:0")?;
+    recv.set_read_timeout(Some(Duration::from_millis(500)))?;
+    let target = recv.local_addr()?;
 
+    // 确保会话仍是 sample（录制自检会换掉）
+    let open = format!(
+        r#"{{"id":"r0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 session.open 响应")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("replay 前 session.open 失败: {opened}"),
+        ));
+    }
+
+    let start = format!(
+        r#"{{"id":"r1","cmd":"replay.start","type":"udp","config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        target.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 replay.start 响应")
+    })?;
+    if !started.contains("\"ok\":true") || !started.contains("\"started\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("replay.start 失败: {started}"),
+        ));
+    }
+
+    let mut got = 0u32;
+    let mut saw_progress = false;
+    let mut saw_done = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    client.set_read_timeout(Some(Duration::from_millis(200)))?;
+    while std::time::Instant::now() < deadline && (!saw_done || got < 2) {
+        let mut buf = [0u8; 256];
+        match recv.recv_from(&mut buf) {
+            Ok((n, _)) => {
+                if n > 0 {
+                    got += 1;
+                }
+            }
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"replay.progress\"") {
+                    saw_progress = true;
+                }
+                if frame.contains("\"event\":\"replay.done\"") {
+                    saw_done = true;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    // 若自然结束未到，主动 stop
+    if !saw_done {
+        write_text_frame_client(client, r#"{"id":"r2","cmd":"replay.stop"}"#)?;
+        for _ in 0..16 {
+            let frame = read_text_frame(client)?.ok_or_else(|| {
+                io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 replay.stop 响应")
+            })?;
+            if frame.contains("\"id\":\"r2\"") {
+                if !frame.contains("\"ok\":true") {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("replay.stop 失败: {frame}"),
+                    ));
+                }
+                break;
+            }
+            if frame.contains("\"event\":\"replay.progress\"") {
+                saw_progress = true;
+            }
+            if frame.contains("\"event\":\"replay.done\"") {
+                saw_done = true;
+            }
+        }
+    } else {
+        // 自然结束后槽位应已空；再 stop 应报错或视为空闲——发 status 即可
+        write_text_frame_client(client, r#"{"id":"r3","cmd":"status"}"#)?;
+        let st = read_text_frame(client)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 status 响应")
+        })?;
+        if !st.contains("\"ok\":true") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("status 失败: {st}"),
+            ));
+        }
+    }
+
+    if got < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("期望至少收到 2 个 UDP 重放包，实际 {got}；progress={saw_progress} done={saw_done}"),
+        ));
+    }
+
+    eprintln!("  控制面 replay.start UDP 环回：通过");
+    Ok(())
+}
+
+fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
     let probe = UdpSocket::bind("127.0.0.1:0")?;
     let udp_addr = probe.local_addr()?;
     drop(probe);

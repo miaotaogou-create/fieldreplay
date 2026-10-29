@@ -10,6 +10,8 @@ import {
   EnginePushEvent,
   EngineRecordStartResult,
   EngineRecordStopResult,
+  EngineReplayStartResult,
+  EngineReplayStopResult,
   EngineRpcErr,
   EngineRpcOk,
   EngineSessionDto,
@@ -169,6 +171,18 @@ export class EngineClient {
 
   stopRecord(): Promise<EngineRecordStopResult> {
     return this.request<EngineRecordStopResult>('record.stop', {});
+  }
+
+  startReplay(args: {
+    type: string;
+    config: Record<string, unknown>;
+    topicPrefix?: string;
+  }): Promise<EngineReplayStartResult> {
+    return this.request<EngineReplayStartResult>('replay.start', args);
+  }
+
+  stopReplay(): Promise<EngineReplayStopResult> {
+    return this.request<EngineReplayStopResult>('replay.stop', {});
   }
 }
 

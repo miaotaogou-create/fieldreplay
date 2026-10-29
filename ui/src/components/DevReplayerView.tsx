@@ -9,6 +9,7 @@ import {
   CaptureSessionMetadata,
   ReplayConfig,
 } from '../types/recorder';
+import { ReplayTargetType } from '../engine/replayTargetConfig';
 import {
   Play,
   Pause,
@@ -31,6 +32,18 @@ interface DevReplayerViewProps {
   /** 优先走引擎解析真实二进制 .fcap；未连引擎时可回落 JSON 演示包 */
   onLoadCaptureFile?: (file: File) => void | Promise<void>;
   onSelectPacketForInspection: (packet: CapturedPacket) => void;
+  engineConnected?: boolean;
+  engineReplayTick?: {
+    sent: number;
+    relativeUs: number;
+    durationUs: number;
+  } | null;
+  engineReplayDoneSeq?: number;
+  onEngineStartReplay?: (
+    tab: ReplayTargetType,
+    cfg: ReplayConfig
+  ) => Promise<void>;
+  onEngineStopReplay?: () => Promise<unknown>;
 }
 
 export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
@@ -39,6 +52,11 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   onUploadSession,
   onLoadCaptureFile,
   onSelectPacketForInspection,
+  engineConnected = false,
+  engineReplayTick = null,
+  engineReplayDoneSeq = 0,
+  onEngineStartReplay,
+  onEngineStopReplay,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -92,7 +110,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const timerRef = useRef<any>(null);
+  const engineBusyRef = useRef(false);
   const hasPackets = packets.length > 0;
+  const useEngineReplay = engineConnected && !!onEngineStartReplay && !!onEngineStopReplay;
 
   const totalDurationUs = hasPackets ? packets[packets.length - 1].timestampUs : 0;
   const safeIndex = hasPackets ? Math.min(currentIndex, packets.length - 1) : 0;
@@ -108,9 +128,49 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     setDispatchedPackets([]);
   }, [sessionMetadata.sessionTitle, packets.length]);
 
-  // Playback Loop Engine
+  // 引擎进度 → 播放头 + 发帧日志
   useEffect(() => {
-    if (!isPlaying || packets.length === 0) {
+    if (!useEngineReplay || !engineReplayTick || engineReplayTick.relativeUs <= 0) {
+      return;
+    }
+    const targetUs = engineReplayTick.relativeUs;
+    let closestIdx = 0;
+    let minDiff = Infinity;
+    for (let i = 0; i < packets.length; i++) {
+      const diff = Math.abs(packets[i].timestampUs - targetUs);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIdx = i;
+      }
+    }
+    setCurrentIndex(closestIdx);
+    const pkt = packets[closestIdx];
+    if (pkt) {
+      setDispatchedPackets((old) => [
+        {
+          id: pkt.id,
+          time:
+            new Date().toLocaleTimeString()
+            + '.'
+            + (Date.now() % 1000).toString().padStart(3, '0'),
+          channel: pkt.channelName,
+          status: 'ok',
+          bytes: pkt.length,
+        },
+        ...old.slice(0, 39),
+      ]);
+    }
+  }, [engineReplayTick, packets, useEngineReplay]);
+
+  useEffect(() => {
+    if (!useEngineReplay || engineReplayDoneSeq === 0) return;
+    setIsPlaying(false);
+    engineBusyRef.current = false;
+  }, [engineReplayDoneSeq, useEngineReplay]);
+
+  // 离线 mock 播放环；引擎已连时不走本地定时器
+  useEffect(() => {
+    if (useEngineReplay || !isPlaying || packets.length === 0) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -129,7 +189,6 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         const nextIdx = prev + 1;
         const pkt = packets[nextIdx];
 
-        // Fault injection check
         let status: 'ok' | 'dropped' | 'corrupted' = 'ok';
         if (replayConfig.faultInjection.enabled) {
           if (
@@ -142,7 +201,6 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           }
         }
 
-        // 丢包也记入日志，便于核对故障注入效果
         setDispatchedPackets((old) => [
           {
             id: pkt.id,
@@ -161,10 +219,42 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isPlaying, replaySpeed, isLooping, packets, replayConfig.faultInjection]);
+  }, [isPlaying, replaySpeed, isLooping, packets, replayConfig.faultInjection, useEngineReplay]);
 
   const handleTogglePlay = () => {
     if (!hasPackets) return;
+    if (useEngineReplay) {
+      if (engineBusyRef.current) return;
+      if (isPlaying) {
+        engineBusyRef.current = true;
+        void onEngineStopReplay!()
+          .then(() => {
+            setIsPlaying(false);
+          })
+          .catch((e) => {
+            console.error(e);
+          })
+          .finally(() => {
+            engineBusyRef.current = false;
+          });
+        return;
+      }
+      engineBusyRef.current = true;
+      setCurrentIndex(0);
+      setDispatchedPackets([]);
+      void onEngineStartReplay!(activeTargetTab, replayConfig)
+        .then(() => {
+          setIsPlaying(true);
+        })
+        .catch((e) => {
+          console.error(e);
+          setIsPlaying(false);
+        })
+        .finally(() => {
+          engineBusyRef.current = false;
+        });
+      return;
+    }
     if (currentIndex >= packets.length - 1) {
       setCurrentIndex(0);
     }
@@ -172,24 +262,28 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   };
 
   const handleReset = () => {
+    if (useEngineReplay && isPlaying) {
+      void onEngineStopReplay?.().catch(() => undefined);
+    }
     setIsPlaying(false);
     setCurrentIndex(0);
   };
 
   const handleStepForward = () => {
-    if (!hasPackets) return;
+    if (!hasPackets || (useEngineReplay && isPlaying)) return;
     setIsPlaying(false);
     setCurrentIndex((prev) => Math.min(packets.length - 1, prev + 1));
   };
 
   const handleStepBack = () => {
-    if (!hasPackets) return;
+    if (!hasPackets || (useEngineReplay && isPlaying)) return;
     setIsPlaying(false);
     setCurrentIndex((prev) => Math.max(0, prev - 1));
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!hasPackets || totalDurationUs <= 0) return;
+    if (useEngineReplay && isPlaying) return;
     const val = parseFloat(e.target.value);
     const targetUs = (val / 100) * totalDurationUs;
     // Find closest packet index
@@ -391,8 +485,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <button
               type="button"
               onClick={handleStepBack}
-              disabled={!hasPackets}
-              title="逐帧单步后退"
+              disabled={!hasPackets || (useEngineReplay && isPlaying)}
+              title={
+                useEngineReplay && isPlaying
+                  ? '引擎重放中不可单步'
+                  : '逐帧单步后退'
+              }
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
             >
               <StepBack className="w-4 h-4" />
@@ -411,12 +509,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               {isPlaying ? (
                 <>
                   <Pause className="w-4 h-4" />
-                  <span>暂停重演</span>
+                  <span>{useEngineReplay ? '停止重演' : '暂停重演'}</span>
                 </>
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-white" />
-                  <span>高保真重演</span>
+                  <span>{useEngineReplay ? '引擎重演' : '高保真重演'}</span>
                 </>
               )}
             </button>
@@ -424,8 +522,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <button
               type="button"
               onClick={handleStepForward}
-              disabled={!hasPackets}
-              title="逐帧单步前进（微秒级步进）"
+              disabled={!hasPackets || (useEngineReplay && isPlaying)}
+              title={
+                useEngineReplay && isPlaying
+                  ? '引擎重放中不可单步'
+                  : '逐帧单步前进（微秒级步进）'
+              }
               className="p-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
             >
               <StepForward className="w-4 h-4" />
@@ -433,30 +535,37 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
             <button
               type="button"
+              disabled={useEngineReplay}
+              title={useEngineReplay ? '引擎重放暂不支持循环（恒速一遍）' : undefined}
               onClick={() => {
+                if (useEngineReplay) return;
                 const next = !isLooping;
                 setIsLooping(next);
                 setReplayConfig((cfg) => ({ ...cfg, loop: next }));
               }}
-              className={`px-3 py-2 text-xs rounded-lg border transition-colors ${
-                isLooping
+              className={`px-3 py-2 text-xs rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                isLooping && !useEngineReplay
                   ? 'bg-slate-800 text-sky-400 border-sky-500/50'
                   : 'bg-slate-900 text-slate-500 border-slate-800'
               }`}
             >
-              循环回放: {isLooping ? '开' : '关'}
+              循环回放: {useEngineReplay ? '引擎关' : isLooping ? '开' : '关'}
             </button>
           </div>
 
           {/* Speed Presets */}
           <div className="flex items-center gap-1.5 p-1 bg-slate-800/80 rounded-lg">
-            <span className="text-[11px] text-slate-400 px-2">倍速:</span>
+            <span className="text-[11px] text-slate-400 px-2">
+              {useEngineReplay ? '倍速(仅预览):' : '倍速:'}
+            </span>
             {[0.1, 0.5, 1.0, 2.0, 5.0, 10.0].map((s) => (
               <button
                 key={s}
                 type="button"
+                disabled={useEngineReplay}
+                title={useEngineReplay ? '引擎重放固定 1x' : undefined}
                 onClick={() => handleSpeedChange(s)}
-                className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors ${
+                className={`px-2.5 py-1 text-xs font-mono font-medium rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                   replaySpeed === s
                     ? 'bg-sky-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'

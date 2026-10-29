@@ -49,11 +49,15 @@ export interface EngineRpcErr {
   error: string;
 }
 
-/** 无 id 的服务端推送（如录制预览帧）。 */
+/** 无 id 的服务端推送（如录制预览帧 / 重放进度）。 */
 export interface EnginePushEvent {
   event: string;
   packet?: EnginePacketDto;
   error?: string;
+  sent?: number;
+  relativeUs?: number;
+  durationUs?: number;
+  stopped?: boolean;
 }
 
 export interface EngineRecordStartResult {
@@ -69,4 +73,16 @@ export interface EngineRecordStopResult {
   durationUs: number;
   finalized: boolean;
   warning?: string;
+}
+
+export interface EngineReplayStartResult {
+  started: boolean;
+  type: string;
+  config: Record<string, unknown>;
+  durationUs: number;
+}
+
+export interface EngineReplayStopResult {
+  stopped: boolean;
+  sent: number;
 }

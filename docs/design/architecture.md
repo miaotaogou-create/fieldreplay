@@ -70,12 +70,14 @@
 
 | cmd | 作用 |
 |-----|------|
-| `ping` / `status` | 探活；`status.state` 为 `idle` \| `recording` |
-| `session.open` / `session.load` / `session.clear` | 载入/清空内存会话（E5a） |
+| `ping` / `status` | 探活；`status.state` 为 `idle` \| `recording` \| `replaying` |
+| `session.open` / `session.load` / `session.clear` | 载入/清空内存会话（E5a）；录制/重放中拒绝 |
 | `record.start` | 启真实通道录制：`type` + `config`（与 `.fcap` config_json 对齐）；可选 `out` / `name` / `sessionTitle`。同时刻一路。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`） |
 | `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
+| `replay.start` | 对已载入会话按时间轴重放：`type` + `config`（UDP `target_ip`/`target_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`，角色由文件取反；MQTT `broker`/`port` + 可选 `topicPrefix`）。同时刻一路，与录制互斥。推送 `replay.progress`（`sent`/`relativeUs`/`durationUs`）与结束时 `replay.done` |
+| `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位 |
 
-重放控制（`replay.*`）属 E5c；导出二进制收口属 E5d。
+导出二进制收口属 E5d。真实暂停 / 倍速 / seek / 故障注入仍后置（开发预览页离线 mock 可继续演示）。
 
 ## 会话文件
 

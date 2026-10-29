@@ -3,7 +3,7 @@
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::clock::SessionClock;
@@ -15,6 +15,9 @@ use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{accept_until, connect, listen, write_all, TcpConfig, TcpRole};
 use crate::udp::{bind_sender, send_to};
 
+/// 每发出一帧数据后的进度回调（`sent` 为已发数据帧数，`relative_us` 为该帧时戳）。
+pub type OnReplayProgress<'a> = Option<&'a mut dyn FnMut(u64, u64)>;
+
 pub struct ReplayOptions {
     pub in_path: std::path::PathBuf,
     pub target: SocketAddr,
@@ -23,6 +26,16 @@ pub struct ReplayOptions {
 }
 
 pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
+    let stop = AtomicBool::new(false);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_udp_from_file_with(opts, &stop, &mut on)
+}
+
+pub fn replay_udp_from_file_with(
+    opts: &ReplayOptions,
+    stop: &AtomicBool,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
     if !reader.header().is_finalized() {
         eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
@@ -51,6 +64,9 @@ pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
 
     reader.rewind_packets()?;
     while let Some(pkt) = reader.next_packet()? {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
         if pkt.kind != PacketKind::Data {
             continue;
         }
@@ -61,9 +77,14 @@ pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
         if ch.map(|c| c.channel_type) != Some(ChannelType::Udp) {
             continue;
         }
-        SessionClock::sleep_until_relative(base, pkt.relative_us);
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+            break;
+        }
         send_to(&sock, &pkt.payload, opts.target)?;
         sent += 1;
+        if let Some(cb) = on_progress.as_mut() {
+            cb(sent, pkt.relative_us);
+        }
     }
 
     eprintln!("重放结束：发送 {sent} 帧");
@@ -92,12 +113,25 @@ pub fn replay_serial_from_file(opts: &SerialReplayOptions) -> io::Result<u64> {
         &opts.config,
         std::time::Duration::from_millis(200),
     )?;
-    replay_serial_with_port(opts, &port)
+    let stop = AtomicBool::new(false);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_serial_with_port_with(opts, &port, &stop, &mut on)
 }
 
 pub fn replay_serial_with_port(
     opts: &SerialReplayOptions,
     port: &SerialPort,
+) -> io::Result<u64> {
+    let stop = AtomicBool::new(false);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_serial_with_port_with(opts, port, &stop, &mut on)
+}
+
+pub fn replay_serial_with_port_with(
+    opts: &SerialReplayOptions,
+    port: &SerialPort,
+    stop: &AtomicBool,
+    on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
     if !reader.header().is_finalized() {
@@ -126,6 +160,9 @@ pub fn replay_serial_with_port(
 
     reader.rewind_packets()?;
     while let Some(pkt) = reader.next_packet()? {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
         if pkt.kind != PacketKind::Data {
             continue;
         }
@@ -136,9 +173,14 @@ pub fn replay_serial_with_port(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Serial) {
             continue;
         }
-        SessionClock::sleep_until_relative(base, pkt.relative_us);
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+            break;
+        }
         port.write_all(&pkt.payload)?;
         sent += 1;
+        if let Some(cb) = on_progress.as_mut() {
+            cb(sent, pkt.relative_us);
+        }
     }
 
     eprintln!("重放结束：发送 {sent} 帧");
@@ -156,6 +198,15 @@ pub struct TcpReplayOptions {
 pub fn replay_tcp_from_file(
     opts: &TcpReplayOptions,
     stop: &AtomicBool,
+) -> io::Result<u64> {
+    let mut on: OnReplayProgress<'_> = None;
+    replay_tcp_from_file_with(opts, stop, &mut on)
+}
+
+pub fn replay_tcp_from_file_with(
+    opts: &TcpReplayOptions,
+    stop: &AtomicBool,
+    on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
     if !reader.header().is_finalized() {
@@ -186,7 +237,7 @@ pub fn replay_tcp_from_file(
 
     reader.rewind_packets()?;
     while let Some(pkt) = reader.next_packet()? {
-        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+        if stop.load(Ordering::SeqCst) {
             break;
         }
         let ch = reader
@@ -197,7 +248,9 @@ pub fn replay_tcp_from_file(
             continue;
         }
 
-        SessionClock::sleep_until_relative(base, pkt.relative_us);
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+            break;
+        }
 
         match pkt.kind {
             PacketKind::TcpConnect => {
@@ -235,6 +288,9 @@ pub fn replay_tcp_from_file(
                 };
                 write_all(s, &pkt.payload)?;
                 sent += 1;
+                if let Some(cb) = on_progress.as_mut() {
+                    cb(sent, pkt.relative_us);
+                }
             }
             PacketKind::TcpDisconnect => {
                 stream = None;
@@ -260,6 +316,16 @@ pub struct MqttReplayOptions {
 
 /// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
 pub fn replay_mqtt_from_file(opts: &MqttReplayOptions) -> io::Result<u64> {
+    let stop = AtomicBool::new(false);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_mqtt_from_file_with(opts, &stop, &mut on)
+}
+
+pub fn replay_mqtt_from_file_with(
+    opts: &MqttReplayOptions,
+    stop: &AtomicBool,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
     if !reader.header().is_finalized() {
         eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
@@ -295,6 +361,9 @@ pub fn replay_mqtt_from_file(opts: &MqttReplayOptions) -> io::Result<u64> {
 
     reader.rewind_packets()?;
     while let Some(pkt) = reader.next_packet()? {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
         if pkt.kind != PacketKind::Data {
             continue;
         }
@@ -312,9 +381,14 @@ pub fn replay_mqtt_from_file(opts: &MqttReplayOptions) -> io::Result<u64> {
             .unwrap_or_else(|| mqtt_qos_from_flags(pkt.flags));
         let retain = mqtt_retain_from_flags(pkt.flags);
 
-        SessionClock::sleep_until_relative(base, pkt.relative_us);
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+            break;
+        }
         client.publish(&topic, &pkt.payload, qos, retain)?;
         sent += 1;
+        if let Some(cb) = on_progress.as_mut() {
+            cb(sent, pkt.relative_us);
+        }
     }
 
     let _ = client.disconnect();

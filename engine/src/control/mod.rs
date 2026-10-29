@@ -5,6 +5,7 @@ mod dto;
 mod hub;
 mod json_util;
 mod live;
+mod replay_live;
 mod server;
 mod sha1;
 mod state;

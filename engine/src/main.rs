@@ -70,7 +70,7 @@ record：无 --duration 时按 Enter 停止并收尾写盘。
 --bind / --port / --tcp / --mqtt 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
-serve：本机 WebSocket 控制面（供 UI 开发预览；cmd: ping/status/session.load|open|clear）。
+serve：本机 WebSocket 控制面（供 UI 开发预览；cmd: ping/status/session.*/record.*/replay.start|stop）。
 "
     );
 }

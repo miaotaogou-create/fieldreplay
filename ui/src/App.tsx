@@ -21,12 +21,17 @@ import { PacketsView } from './components/PacketsView';
 import { QtArchitectureGuide } from './components/QtArchitectureGuide';
 import { channelToEngineConfig, pickRecordChannel } from './engine/channelConfig';
 import { defaultEngineUrl, EngineClient } from './engine/client';
+import {
+  replayConfigToEngine,
+  ReplayTargetType,
+} from './engine/replayTargetConfig';
 import { EngineConnState } from './engine/types';
 import {
   emptySessionMetadata,
   mapEnginePacket,
   mapEngineSession,
 } from './engine/sessionMap';
+import { ReplayConfig } from './types/recorder';
 
 const TOAST_MS = 3500;
 
@@ -38,6 +43,12 @@ export default function App() {
   );
   const [recordedPackets, setRecordedPackets] = useState<CapturedPacket[]>([]);
   const [engineState, setEngineState] = useState<EngineConnState>('disconnected');
+  const [engineReplayTick, setEngineReplayTick] = useState<{
+    sent: number;
+    relativeUs: number;
+    durationUs: number;
+  } | null>(null);
+  const [engineReplayDoneSeq, setEngineReplayDoneSeq] = useState(0);
 
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -79,6 +90,24 @@ export default function App() {
         setRecordedPackets((prev) => [...prev, mapped]);
       } else if (ev.event === 'record.error' && ev.error) {
         toastFnRef.current(`录制错误：${ev.error}`);
+      } else if (ev.event === 'replay.progress') {
+        setEngineReplayTick({
+          sent: ev.sent ?? 0,
+          relativeUs: ev.relativeUs ?? 0,
+          durationUs: ev.durationUs ?? 0,
+        });
+      } else if (ev.event === 'replay.done') {
+        setEngineReplayTick({
+          sent: ev.sent ?? 0,
+          relativeUs: 0,
+          durationUs: 0,
+        });
+        setEngineReplayDoneSeq((n) => n + 1);
+        toastFnRef.current(
+          ev.stopped
+            ? `重放已停止（已发 ${ev.sent ?? 0} 帧）`
+            : `重放完成（已发 ${ev.sent ?? 0} 帧）`
+        );
       }
     };
     client.start();
@@ -137,6 +166,37 @@ export default function App() {
     showToast(
       `录制已停止：${result.packetCount} 帧已写入 ${result.out.split(/[/\\]/).pop()}`
     );
+    return result;
+  };
+
+  const handleEngineStartReplay = async (
+    tab: ReplayTargetType,
+    cfg: ReplayConfig
+  ) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    if (recordedPackets.length === 0) {
+      throw new Error('会话无帧，请先载入 .fcap');
+    }
+    const mapped = replayConfigToEngine(tab, cfg);
+    setEngineReplayTick(null);
+    await engine.startReplay({
+      type: mapped.type,
+      config: mapped.config,
+      topicPrefix: mapped.topicPrefix,
+    });
+    showToast(`已开始引擎重放：${mapped.type}`);
+  };
+
+  const handleEngineStopReplay = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.stopReplay();
+    showToast(`重放已停止：已发 ${result.sent} 帧`);
     return result;
   };
 
@@ -310,6 +370,11 @@ export default function App() {
             onUploadSession={handleUploadSession}
             onLoadCaptureFile={handleLoadCaptureFile}
             onSelectPacketForInspection={() => setCurrentTab('packets')}
+            engineConnected={engineState === 'connected'}
+            engineReplayTick={engineReplayTick}
+            engineReplayDoneSeq={engineReplayDoneSeq}
+            onEngineStartReplay={handleEngineStartReplay}
+            onEngineStopReplay={handleEngineStopReplay}
           />
         )}
 

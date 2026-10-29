@@ -7,7 +7,7 @@ use crate::mqtt::{mqtt_qos_from_flags, mqtt_retain_from_flags};
 
 use super::b64;
 use super::json_util::escape_str;
-use super::state::{ActiveRecording, ControlState, LoadedSession};
+use super::state::{ActiveRecording, ActiveReplay, ControlState, LoadedSession};
 
 pub fn status_json(g: &ControlState) -> String {
     let recording = g
@@ -15,17 +15,24 @@ pub fn status_json(g: &ControlState) -> String {
         .as_ref()
         .map(recording_status_json)
         .unwrap_or_else(|| "null".into());
+    let replaying = g
+        .replaying
+        .as_ref()
+        .map(replaying_status_json)
+        .unwrap_or_else(|| "null".into());
     let state = if g.recording.is_some() {
         "recording"
+    } else if g.replaying.is_some() {
+        "replaying"
     } else {
         "idle"
     };
     match &g.session {
         None => format!(
-            "{{\"state\":\"{state}\",\"sessionLoaded\":false,\"packetCount\":0,\"recording\":{recording}}}"
+            "{{\"state\":\"{state}\",\"sessionLoaded\":false,\"packetCount\":0,\"recording\":{recording},\"replaying\":{replaying}}}"
         ),
         Some(s) => format!(
-            "{{\"state\":\"{state}\",\"sessionLoaded\":true,\"packetCount\":{},\"source\":\"{}\",\"recording\":{recording}}}",
+            "{{\"state\":\"{state}\",\"sessionLoaded\":true,\"packetCount\":{},\"source\":\"{}\",\"recording\":{recording},\"replaying\":{replaying}}}",
             s.packets.len(),
             escape_str(&s.source)
         ),
@@ -38,6 +45,15 @@ pub fn recording_status_json(active: &ActiveRecording) -> String {
         escape_str(&active.out_path.to_string_lossy()),
         active.packet_count.load(Ordering::SeqCst),
         escape_str(&active.channel_type)
+    )
+}
+
+pub fn replaying_status_json(active: &ActiveReplay) -> String {
+    format!(
+        "{{\"sent\":{},\"type\":\"{}\",\"durationUs\":{}}}",
+        active.sent_count.load(Ordering::SeqCst),
+        escape_str(&active.channel_type),
+        active.duration_us
     )
 }
 

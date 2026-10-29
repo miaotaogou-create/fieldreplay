@@ -1,7 +1,7 @@
-//! 控制面共享状态（会话载入 + 实时录制）。
+//! 控制面共享状态（会话载入 + 实时录制 / 重放）。
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -12,6 +12,16 @@ pub struct ActiveRecording {
     pub out_path: PathBuf,
     pub channel_type: String,
     pub packet_count: Arc<AtomicU64>,
+    pub join: Option<JoinHandle<std::io::Result<u64>>>,
+}
+
+pub struct ActiveReplay {
+    pub stop: Arc<AtomicBool>,
+    /// 线程自然结束或 stop 后置 true，供 status/下一次 start 回收槽位。
+    pub finished: Arc<AtomicBool>,
+    pub channel_type: String,
+    pub sent_count: Arc<AtomicU64>,
+    pub duration_us: u64,
     pub join: Option<JoinHandle<std::io::Result<u64>>>,
 }
 
@@ -30,6 +40,7 @@ pub struct LoadedSession {
 pub struct ControlState {
     pub session: Option<LoadedSession>,
     pub recording: Option<ActiveRecording>,
+    pub replaying: Option<ActiveReplay>,
 }
 
 impl ControlState {
@@ -37,6 +48,24 @@ impl ControlState {
         Self {
             session: None,
             recording: None,
+            replaying: None,
+        }
+    }
+
+    /// 回收已结束的重放线程，避免自然播完后仍占着 `replaying` 槽。
+    pub fn reap_finished_replay(&mut self) {
+        let done = self
+            .replaying
+            .as_ref()
+            .map(|a| a.finished.load(Ordering::SeqCst))
+            .unwrap_or(false);
+        if !done {
+            return;
+        }
+        if let Some(mut active) = self.replaying.take() {
+            if let Some(j) = active.join.take() {
+                let _ = j.join();
+            }
         }
     }
 }

@@ -15,14 +15,14 @@
 | 架构选型 | 已确认：原生录放引擎 + 现有 React UI 壳 + 打包为单入口应用 |
 | 引擎语言 | **Rust**（仅 std）；见决策 14 |
 | 仓库骨架 / docs / 进度本 | 已就绪 |
-| **`ui/` 界面** | U8 通过后已做小抛光（故障标记 + 去掉协议解包 UI）；仍为 mock；`npm run dev` 仅开发预览 |
+| **`ui/` 界面** | U8 通过；引擎已连时录制/重演走控制面，离线仍可 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
-| `engine/` 原生引擎 | **E5b 已完成**：控制面 `record.start/stop` + 预览推送；通道录放 CLI 仍可用 |
+| `engine/` 原生引擎 | **E5c 已完成**：控制面 `record.*` + `replay.start/stop` + 进度推送；通道录放 CLI 仍可用 |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
 | 二进制 `.fcap` 读写 | **已落地**（`engine` 的 `SessionWriter` / `SessionReader`） |
 | 打包单入口 | 未开始（E6）；普通客户端窗口，见决策 11/13 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E5c** 重演页去 mock：经控制 API 按时间轴真实重放（目标映射） |
+| **下一步** | **E5d** 导出写真实二进制 `.fcap`；mock 样本仅作引擎未连接时的离线演示；收口 E5 |
 
 ## 已确认决策
 
@@ -109,23 +109,23 @@ fieldreplay/
 | E2 | 串口录放 | [x] | 2026-10-29：`serial` Win32 实口 + 内存环回；`record`/`replay --port`；self-check 串口环回通过 |
 | E3 | TCP 角色可配录放 | [x] | 2026-10-29：`tcp` std；server/client 录连接事件+RX；重放角色取反；CLI `--tcp-role`/`--tcp`；self-check 双向环回通过 |
 | E4 | MQTT 订阅录 / 发布放 | [x] | 2026-10-29：`mqtt` 最小 3.1.1（std）；订阅录/发布放；CLI `--mqtt`/`--topic`/`--topic-prefix`；迷你 Broker 环回 self-check 通过；无账号/TLS |
-| E5 | UI 去 mock，接本地 IPC/WebSocket（拆成 E5a–E5d） | [ ] | 进行中（E5a/E5b 已完成） |
+| E5 | UI 去 mock，接本地 IPC/WebSocket（拆成 E5a–E5d） | [ ] | 进行中（E5a–E5c 已完成） |
 | E5a | 引擎 `serve`：本地 WebSocket 控制 API（ping/status/session.load\|open\|clear）；UI 可连上并载入真实 `.fcap` 进报文列表；去掉启动自动 mock 样本 | [x] | 2026-10-29：`control` 模块（std WS）；CLI `serve`；UI `engine/` 客户端；顶栏引擎状态；重演页二进制 `.fcap` 经引擎载入；启动不再自动 mock |
 | E5b | 录制页去 mock 发包：经控制 API 启停真实 UDP/串口/TCP/MQTT 录制，预览窗收引擎推送 | [x] | 2026-10-29：`record.start/stop` + `record.packet` 推送；录制钩子；UI 引擎已连时走真实启停；离线仍可 mock；self-check UDP 环回通过 |
-| E5c | 重演页去 mock 播放：经控制 API 载入后真实按时间轴重放（目标映射） | [ ] ← **当前下一步** | |
-| E5d | 导出写真实二进制 `.fcap`；mock 样本仅作引擎未连接时的离线演示；收口 E5 | [ ] | |
+| E5c | 重演页去 mock 播放：经控制 API 载入后真实按时间轴重放（目标映射） | [x] | 2026-10-29：`replay.start/stop` + `replay.progress`/`done`；四通道可中断；UI 引擎已连时走真重放（1x，无循环/倍速）；self-check UDP 环回通过 |
+| E5d | 导出写真实二进制 `.fcap`；mock 样本仅作引擎未连接时的离线演示；收口 E5 | [ ] ← **当前下一步** | |
 | E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [ ] | |
 | E7 | （后置）视频通道 | [ ] | |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E5c**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E5d**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E4 / 控制面 E5a–E5b 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；控制面仍仅标准库
+3. 界面 U / 引擎 E4 / 控制面 E5a–E5c 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；控制面仍仅标准库
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；交付目标见决策 13
 6. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
-7. **E5b 手测**：引擎连上后只启用一个通道（建议 UDP `0.0.0.0:8080`），点「开始引擎录制」，用外部工具向该口发包，预览窗应出现帧；停止后临时目录有 `.fcap`
+7. **E5c 手测**：引擎连上 → 载入含 UDP 的 `.fcap`（或先 E5b 录一段）→ 重演页选 UDP 目标 →「引擎重演」；对端应用应收到按时间轴的包；进度条随 `replay.progress` 前进；可「停止重演」
 
 ## 决策记录（追加）
 
@@ -146,3 +146,4 @@ fieldreplay/
 | 2026-10-29 | E4 MQTT 仍仅标准库：手写最小 3.1.1；自检嵌迷你 Broker；账号/TLS 后置 | 与决策「先原始字节」一致；待确认项不阻塞录放闭环 |
 | 2026-10-29 | E5 拆为 E5a–E5d；控制面用本机 WebSocket + 手写 JSON（仍仅 std）；E6 再定 Tauri/IPC | 浏览器开发预览只能走 WS/HTTP；热路径仍不经 UI |
 | 2026-10-29 | E5b：同时刻一路录制；推送无 `id` 的 `record.packet`；暂停仅离线 mock | 与单通道会话模型一致；真实暂停后置 |
+| 2026-10-29 | E5c：同时刻一路重放；与录制互斥；`replay.progress`/`done`；真实暂停/倍速/循环后置 | 对齐 CLI 时间轴；UI 离线仍可 mock 倍速与故障注入 |
