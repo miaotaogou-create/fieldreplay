@@ -350,10 +350,10 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-3 space-y-3">
+    <div className="fr-page">
       {/* Session Metadata Banner */}
-      <div className="bg-white rounded-lg border border-slate-200 px-3 py-2.5 shadow-xs">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+      <div className="bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 shadow-xs shrink-0">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-1.5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
@@ -393,7 +393,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         </div>
 
         {sessionMetadata.notes && (
-          <div className="mt-2 px-2 py-1.5 bg-amber-50/70 border border-amber-200/60 rounded-md text-[11px] text-amber-900 flex items-start gap-1.5">
+          <div className="mt-1.5 px-2 py-1 bg-amber-50/70 border border-amber-200/60 rounded-md text-[11px] text-amber-900 flex items-start gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-semibold">现场工单留言: </span>
@@ -404,7 +404,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       </div>
 
       {/* Master Replayer Media Console */}
-      <div className="bg-slate-900 text-white rounded-lg px-3.5 py-3 shadow-md border border-slate-800 space-y-2.5">
+      <div className="bg-slate-900 text-white rounded-lg px-3 py-2 shadow-md border border-slate-800 space-y-2 shrink-0">
         {!hasPackets && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-2.5 py-2 bg-amber-500/10 border border-amber-400/30 rounded-md">
             <div className="flex items-start gap-2 text-[11px] text-amber-100">
@@ -578,10 +578,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         </div>
       </div>
 
+      {/* 下方面板随窗口伸缩；内容过多时仅此区域滚动 */}
+      <div className="fr-page-scroll flex flex-col gap-2">
       {/* Target Output Mapping & Fault Injection Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
         {/* Card 1: Replay Output Target Configuration */}
-        <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2.5 shadow-xs">
+        <div className="bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
             <div className="flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-sky-600" />
@@ -1052,8 +1054,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         </div>
 
         {/* Card 2: Fault Injection Stress Testing */}
-        <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2.5 shadow-xs">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div className="bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
             <div className="flex items-center gap-1.5">
               <Zap className="w-3.5 h-3.5 text-amber-500" />
               <h2 className="text-xs font-bold text-slate-900 tracking-wide">
@@ -1132,9 +1134,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       </div>
 
       {/* Current Replaying Packet Inspector & Dispatched Stream */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-3 space-y-2.5 shadow-xs">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100 gap-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+        <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 gap-2">
             <h3 className="text-xs font-bold text-slate-900 tracking-wide">
               当前重播帧
               {currentPacket ? ` #${currentPacket.id}` : ''}
@@ -1214,8 +1216,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           )}
         </div>
 
-        <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2 shadow-xs">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div className="bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs flex flex-col min-h-[10rem]">
+          <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 shrink-0">
             <h3 className="text-xs font-bold text-slate-900 tracking-wide">
               发往上位机日志
             </h3>
@@ -1226,9 +1228,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             </span>
           </div>
 
-          <div className="h-40 overflow-y-auto divide-y divide-slate-100 font-mono text-[11px]">
+          <div className="flex-1 min-h-[6rem] max-h-48 overflow-y-auto divide-y divide-slate-100 font-mono text-[11px]">
             {dispatchedPackets.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 font-sans text-xs space-y-1.5 py-6">
+              <div className="flex flex-col items-center justify-center h-full text-slate-400 font-sans text-xs space-y-1.5 py-4">
                 <Activity className="w-5 h-5 text-slate-300 stroke-[1.5]" />
                 <p>
                   {hasPackets
@@ -1260,6 +1262,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

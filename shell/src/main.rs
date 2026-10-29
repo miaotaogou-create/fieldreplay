@@ -5,6 +5,9 @@
 //!   fieldreplay --smoke
 //!   fieldreplay --engine <path> --ui-dir <ui/dist> --bind 127.0.0.1:17890
 
+// 双击启动不弹控制台；从 cmd/bat 拉起时 stderr 仍可进父控制台（打包 smoke）
+#![windows_subsystem = "windows"]
+
 mod child;
 mod paths;
 mod window;
@@ -32,7 +35,9 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("fieldreplay: {e}");
+            let msg = format!("fieldreplay: {e}");
+            eprintln!("{msg}");
+            show_fatal(&msg);
             ExitCode::FAILURE
         }
     }
@@ -41,6 +46,7 @@ fn main() -> ExitCode {
 fn run() -> io::Result<()> {
     let opts = parse_args(env::args().skip(1))?;
     if opts.help {
+        // 无控制台时帮助不可见；仍保留给命令行调用
         print_help();
         return Ok(());
     }
@@ -50,9 +56,11 @@ fn run() -> io::Result<()> {
     let bind = opts.bind;
     let url = format!("http://{bind}/");
 
-    eprintln!("引擎: {}", engine.display());
-    eprintln!("UI  : {}", ui_dir.display());
-    eprintln!("地址: {url}");
+    if opts.smoke {
+        eprintln!("引擎: {}", engine.display());
+        eprintln!("UI  : {}", ui_dir.display());
+        eprintln!("地址: {url}");
+    }
 
     let mut child = EngineChild::spawn(&engine, &ui_dir, &bind)?;
     if let Some(code) = child.try_reap()? {
@@ -73,6 +81,44 @@ fn run() -> io::Result<()> {
 
     // EventLoop::run 不返回；关窗回调内 shutdown 引擎
     window::run(&url, child)
+}
+
+/// 双击启动失败时给可见提示（无控制台窗口）。
+fn show_fatal(msg: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = std::ffi::OsStr::new(msg)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let title: Vec<u16> = std::ffi::OsStr::new("FieldReplay")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        extern "system" {
+            fn MessageBoxW(
+                hwnd: *mut std::ffi::c_void,
+                text: *const u16,
+                caption: *const u16,
+                utype: u32,
+            ) -> i32;
+        }
+        const MB_OK: u32 = 0;
+        const MB_ICONERROR: u32 = 0x10;
+        unsafe {
+            MessageBoxW(
+                std::ptr::null_mut(),
+                wide.as_ptr(),
+                title.as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = msg;
+    }
 }
 
 fn parse_args(args: impl Iterator<Item = String>) -> io::Result<Opts> {

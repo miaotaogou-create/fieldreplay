@@ -1,5 +1,47 @@
 @import "tailwindcss";
 
+/* 主区随窗口高度伸缩：矮屏压间距，高屏略松 */
+:root {
+  --fr-page-gap: 0.5rem;
+  --fr-page-pad-y: 0.5rem;
+  --fr-page-pad-x: 0.75rem;
+}
+
+@media (min-height: 960px) {
+  :root {
+    --fr-page-gap: 0.75rem;
+    --fr-page-pad-y: 0.75rem;
+    --fr-page-pad-x: 1rem;
+  }
+}
+
+@media (max-height: 760px) {
+  :root {
+    --fr-page-gap: 0.375rem;
+    --fr-page-pad-y: 0.375rem;
+    --fr-page-pad-x: 0.625rem;
+  }
+}
+
+.fr-page {
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding: var(--fr-page-pad-y) var(--fr-page-pad-x);
+  display: flex;
+  flex-direction: column;
+  gap: var(--fr-page-gap);
+  box-sizing: border-box;
+}
+
+.fr-page-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* WebView2 无边框：标题栏拖动区（WebView2 123+ non-client region） */
 .fr-titlebar-drag {
   app-region: drag;
