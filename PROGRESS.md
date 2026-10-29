@@ -19,7 +19,7 @@
 | `engine/` 原生引擎 | 未开始（**界面完成后再做**） |
 | 二进制 `.fcap` 读写 | 未开始 |
 | 打包单入口 | 未开始 |
-| GitHub 开源仓 | 创建中 / 待确认 |
+| GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
 
 ## 已确认决策
 
