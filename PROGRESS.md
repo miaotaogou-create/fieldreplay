@@ -48,23 +48,42 @@ fieldreplay/
   tests/
 ```
 
-## 下一步（建议顺序）
+## 小任务板（一次只做一格；做完勾选并更新「当前」）
 
-1. [ ] **界面收尾（当前）**：`npm run dev` 手测录制/重演/报文/指南四页；对照原型补缺（文案、空态、导出弹窗、通道开关等）
-2. [ ] 去掉 AI Studio 残留（Gemini 依赖、无用 README 横幅），UI README 改成中文产品说明
-3. [ ] 定稿二进制 `.fcap` v1 与通道元数据（见 `docs/design/fcap-format.md`）
-4. [ ] 实现 `engine` 最小闭环：UDP 录 → 写盘 → UDP 按时间轴重放
-5. [ ] 串口录放；TCP 角色可配录放
-6. [ ] MQTT 订阅录制 / 发布重放
-7. [ ] UI 去掉纯 mock：经本地 IPC/WebSocket 接引擎
-8. [ ] 打包为 Windows 单入口可双击运行
-9. [ ] （后置）视频通道
+> **纪律**：大需求先拆再写；每个新对话默认只接 **一个** 未勾选项。视觉对照：`Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)`。
+
+### 阶段 U — 界面（当前主线，引擎未开始前只做这里）
+
+| ID | 任务 | 状态 | 完成记录 |
+|----|------|------|----------|
+| U0 | 同步 Downloads 原型 `(1)` 差异（MQTT 重演/报文/类型/mock）进 `ui/` | [x] | 2026-10-29 |
+| U1 | 录制页：MQTT 通道展示 + 添加 + mock 发包；通道勾选可开关 | [x] | 2026-10-29 |
+| U2 | 去掉 AI Studio 残留：卸 `@google/genai`、删无用 README 横幅/密钥说明；`ui/README.md` 改中文产品预览说明 | [ ] | **← 当前下一步** |
+| U3 | 录制页对照原型：导出弹窗 / 空态 / 文案 / 筛选与滚动，缺什么补什么（本步只改 `FieldRecorderView`） | [ ] | |
+| U4 | 重演页对照原型：TCP/MQTT/UDP/串口目标区与播放条（本步只改 `DevReplayerView`） | [ ] | |
+| U5 | 报文页对照原型：筛选（含 MQTT）、详情抽屉（本步只改 `PacketsView`） | [ ] | |
+| U6 | 对接说明页对照原型（本步只改 `QtArchitectureGuide`）；产品文案去「仅 Qt」口吻若需通用化 | [ ] | |
+| U7 | 顶栏 / 四 Tab 切换 / Toast（本步只改 `Header`+`App`）对照原型 | [ ] | |
+| U8 | 界面阶段验收：`npm run dev` 手测四页主路径；在进度本记「通过/缺口」清单 | [ ] | |
+
+### 阶段 E — 引擎与格式（界面 U8 通过后再拆细做）
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| E0 | 定稿 `.fcap` v1 文档（`docs/design/fcap-format.md`） | [ ] |
+| E1 | 引擎最小闭环：UDP 录 → 写盘 → 按时间轴重放 | [ ] |
+| E2 | 串口录放 | [ ] |
+| E3 | TCP 角色可配录放 | [ ] |
+| E4 | MQTT 订阅录 / 发布放 | [ ] |
+| E5 | UI 去 mock，接本地 IPC/WebSocket | [ ] |
+| E6 | Windows 单入口打包 | [ ] |
+| E7 | （后置）视频通道 | [ ] |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md`（本文件）→ `docs/requirements/20261029-mvp.md` → `docs/design/architecture.md`
-2. 默认人设：改需求用需求分析；写引擎/对接用软件工程师；写测试用测试工程师
-3. **当前优先界面**：视觉对照 `Downloads\...\fieldreplay---...工作台 (1)`；引擎暂缓
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **U2**）
+2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
+3. 视觉对照 Downloads 原型 `(1)`；引擎阶段未到前不要动 `engine/`
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 
 ## 决策记录（追加）
