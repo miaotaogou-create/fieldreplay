@@ -21,31 +21,41 @@ export const QtArchitectureGuide: React.FC = () => {
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
+  // 示意片段；完整契约见 docs/design/fcap-format.md
   const binaryFormatCode = `// -------------------------------------------------------------
-// 推荐的统一现场捕获文件格式规范 (.fcap 二进制结构体定义)
+// .fcap v1 示意（正式规范：docs/design/fcap-format.md）
+// 小端；热路径顺序追加；不做业务协议解析
 // -------------------------------------------------------------
 
 #pragma pack(push, 1)
 
-// 1. 全局文件头 (32 字节)
+// 1. 文件头（固定 64 字节）
 struct FcapFileHeader {
-    char     magic[4];       // "FCAP" 标识
-    uint16_t version;        // 格式版本: 0x0100 (v1.0)
-    uint16_t channel_count;  // 记录的信道总数
-    uint64_t start_time_us;  // 录制开始绝对时间戳 (UTC Unix微秒)
-    uint64_t total_packets;  // 包总数
-    uint32_t reserved[2];    // 预留对齐
+    char     magic[4];              // "FCAP"
+    uint16_t version;               // 0x0001
+    uint16_t header_bytes;          // 64
+    uint32_t flags;                 // bit0=FINALIZED
+    uint64_t start_wall_unix_us;    // UTC Unix 微秒，未知填 0
+    uint16_t channel_count;
+    uint16_t reserved0;
+    uint32_t channel_table_bytes;
+    uint32_t meta_bytes;            // 可选 UTF-8 JSON
+    uint64_t packet_count;          // 停止时回写
+    uint64_t total_payload_bytes;
+    uint64_t duration_us;
+    uint32_t reserved1;
+    uint32_t crc32_header;          // 可选，0=不校验
 };
 
-// 2. 每一帧数据的前置元数据头 (24 字节)
+// 2. 帧记录头（24 字节）+ aux + payload
 struct FcapPacketHeader {
-    uint64_t relative_us;    // 距离录制起点的相对时间微秒 (微秒时基 Δt)
-    uint8_t  channel_id;     // 信道标识 (0:COM3, 1:UDP_8080, 2:TCP_9000, 3:Video)
-    uint8_t  direction;      // 0: RX (设备流入), 1: TX (上位机下发)
-    uint16_t flags;          // 标志位 (例如 bit 0: 校验错误, bit 1: 关键帧)
-    uint32_t payload_len;    // 紧随其后的二进制负载字节长度
-    uint64_t sequence_id;    // 全局自增帧序列号
-    // 紧接着就是 payload_len 长度的原始二进制数据 (Zero-Copy)
+    uint64_t relative_us;    // 相对录制起点微秒
+    uint16_t channel_index;  // 对应通道表
+    uint8_t  kind;           // 0=data 1=tcp_connect 2=tcp_disconnect 3=marker
+    uint8_t  direction;      // 0=RX 1=TX
+    uint32_t flags;          // MQTT: 低2bit=QoS
+    uint32_t aux_len;        // 如 MQTT topic / 对端地址
+    uint32_t payload_len;    // 原始载荷；其后紧跟 aux 与 payload
 };
 
 #pragma pack(pop)`;
