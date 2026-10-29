@@ -1,6 +1,7 @@
 //! FieldReplay 原生录放引擎库：`.fcap` 读写、UDP/串口/TCP/MQTT 通道、录制与时间轴重放。
 
 pub mod clock;
+pub mod control;
 pub mod fcap;
 pub mod mqtt;
 pub mod record;
@@ -10,6 +11,7 @@ pub mod tcp;
 pub mod udp;
 
 pub use clock::SessionClock;
+pub use control::{serve as serve_control, API_VERSION as CONTROL_API_VERSION, DEFAULT_BIND};
 pub use fcap::{
     ChannelEntry, ChannelType, FileHeader, PacketKind, PacketRecord, SessionReader, SessionWriter,
     FLAG_FINALIZED, FLAG_HAS_META, FCAP_MAGIC, FCAP_VERSION_V1, HEADER_BYTES,

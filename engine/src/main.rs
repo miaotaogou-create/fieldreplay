@@ -1,4 +1,4 @@
-//! FieldReplay 引擎 CLI：`record` / `replay` / `self-check`。
+//! FieldReplay 引擎 CLI：`record` / `replay` / `serve` / `self-check`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -7,15 +7,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use fieldreplay_engine::control::self_check_control;
 use fieldreplay_engine::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter,
 };
 use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file,
-    MiniBroker, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, RecordOptions,
-    ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig,
-    TcpRecordOptions, TcpReplayOptions, TcpRole,
+    serve_control, MiniBroker, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity,
+    RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions,
+    TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
 };
 
 fn main() {
@@ -31,6 +32,7 @@ fn run() -> io::Result<()> {
     match cmd.as_str() {
         "record" => cmd_record(args),
         "replay" => cmd_replay(args),
+        "serve" => cmd_serve(args),
         "self-check" => cmd_self_check(),
         "help" | "-h" | "--help" => {
             print_help();
@@ -47,7 +49,7 @@ fn run() -> io::Result<()> {
 fn print_help() {
     eprintln!(
         "\
-FieldReplay 引擎（E4：UDP + 串口 + TCP + MQTT 录 → .fcap → 按时间轴重放）
+FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
 
 用法:
   fieldreplay-engine record  --bind <ip:port> --out <file.fcap> [--duration <秒>]
@@ -61,14 +63,38 @@ FieldReplay 引擎（E4：UDP + 串口 + TCP + MQTT 录 → .fcap → 按时间�
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>]
+  fieldreplay-engine serve   [--bind 127.0.0.1:17890]
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
 --bind / --port / --tcp / --mqtt 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
+serve：本机 WebSocket 控制面（供 UI 开发预览；cmd: ping/status/session.load|open|clear）。
 "
     );
+}
+
+fn cmd_serve(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut bind: SocketAddr = DEFAULT_BIND.parse().map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidInput, format!("默认 bind: {e}"))
+    })?;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--bind" => {
+                let v = args
+                    .next()
+                    .ok_or_else(|| err_arg("--bind 需要地址"))?;
+                bind = v.parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("bind: {e}"))
+                })?;
+            }
+            other => {
+                return Err(err_arg(format!("serve 未知参数: {other}")));
+            }
+        }
+    }
+    serve_control(bind)
 }
 
 fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
@@ -550,6 +576,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: MQTT 订阅录 / 发布放… ");
     let _ = io::stdout().flush();
     mqtt_loopback_check()?;
+    println!("ok");
+
+    print!("self-check: 控制面 WebSocket… ");
+    let _ = io::stdout().flush();
+    self_check_control()?;
     println!("ok");
 
     let _ = std::fs::remove_file(&path);

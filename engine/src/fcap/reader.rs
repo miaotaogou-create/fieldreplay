@@ -1,7 +1,7 @@
 //! `.fcap` 顺序读。
 
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
 
 use super::types::{
@@ -9,8 +9,11 @@ use super::types::{
     FCAP_VERSION_V1, HEADER_BYTES,
 };
 
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
 pub struct SessionReader {
-    file: File,
+    inner: Box<dyn ReadSeek>,
     header: FileHeader,
     channels: Vec<ChannelEntry>,
     meta_json: Option<String>,
@@ -19,8 +22,16 @@ pub struct SessionReader {
 
 impl SessionReader {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut file = File::open(path)?;
-        let header = read_header(&mut file)?;
+        Self::from_seekable(Box::new(File::open(path)?))
+    }
+
+    /// 从内存字节打开（控制面 `session.load` 用）。
+    pub fn open_bytes(bytes: Vec<u8>) -> io::Result<Self> {
+        Self::from_seekable(Box::new(Cursor::new(bytes)))
+    }
+
+    fn from_seekable(mut inner: Box<dyn ReadSeek>) -> io::Result<Self> {
+        let header = read_header(&mut inner)?;
         if header.magic != FCAP_MAGIC {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -41,16 +52,16 @@ impl SessionReader {
         }
         // v1 写端固定 64；若未来头更长则跳过多余字节
         if header.header_bytes as u64 > HEADER_BYTES as u64 {
-            file.seek(SeekFrom::Start(header.header_bytes as u64))?;
+            inner.seek(SeekFrom::Start(header.header_bytes as u64))?;
         }
 
         let mut table_buf = vec![0u8; header.channel_table_bytes as usize];
-        file.read_exact(&mut table_buf)?;
+        inner.read_exact(&mut table_buf)?;
         let channels = decode_channel_table(&table_buf, header.channel_count)?;
 
         let meta_json = if header.meta_bytes > 0 {
             let mut meta = vec![0u8; header.meta_bytes as usize];
-            file.read_exact(&mut meta)?;
+            inner.read_exact(&mut meta)?;
             Some(
                 String::from_utf8(meta)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
@@ -59,14 +70,14 @@ impl SessionReader {
             None
         };
 
-        let packets_offset = file.stream_position()?;
+        let packets_offset = inner.stream_position()?;
 
         if header.flags & FLAG_FINALIZED == 0 && header.packet_count == 0 {
             // 未收尾：仍允许扫到 EOF，由调用方决定是否接受
         }
 
         Ok(Self {
-            file,
+            inner,
             header,
             channels,
             meta_json,
@@ -87,13 +98,13 @@ impl SessionReader {
     }
 
     pub fn rewind_packets(&mut self) -> io::Result<()> {
-        self.file.seek(SeekFrom::Start(self.packets_offset))?;
+        self.inner.seek(SeekFrom::Start(self.packets_offset))?;
         Ok(())
     }
 
     /// 读下一条；EOF 返回 `None`。未知 kind 仍返回记录（kind 映射失败则跳过正文并继续——见下）。
     pub fn next_packet(&mut self) -> io::Result<Option<PacketRecord>> {
-        match read_packet(&mut self.file) {
+        match read_packet(&mut self.inner) {
             Ok(p) => Ok(Some(p)),
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
             Err(e) => Err(e),

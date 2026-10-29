@@ -28,6 +28,8 @@ interface DevReplayerViewProps {
   sessionMetadata: CaptureSessionMetadata;
   packets: CapturedPacket[];
   onUploadSession: (metadata: CaptureSessionMetadata, packets: CapturedPacket[]) => void;
+  /** 优先走引擎解析真实二进制 .fcap；未连引擎时可回落 JSON 演示包 */
+  onLoadCaptureFile?: (file: File) => void | Promise<void>;
   onSelectPacketForInspection: (packet: CapturedPacket) => void;
 }
 
@@ -35,6 +37,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   sessionMetadata,
   packets,
   onUploadSession,
+  onLoadCaptureFile,
   onSelectPacketForInspection,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -210,6 +213,15 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
+
+    if (onLoadCaptureFile) {
+      void Promise.resolve(onLoadCaptureFile(file)).then(() => {
+        setCurrentIndex(0);
+        setIsPlaying(false);
+      });
+      return;
+    }
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -217,7 +229,6 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         const text = event.target?.result as string;
         const parsed = JSON.parse(text);
         if (parsed.metadata && parsed.packets) {
-          // Re-instantiate Uint8Array data from hex or array if needed
           const rehydrated = parsed.packets.map((p: any) => ({
             ...p,
             data: new Uint8Array(p.data ? Object.values(p.data) : []),

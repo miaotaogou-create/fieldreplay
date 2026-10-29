@@ -19,27 +19,33 @@ import { FieldRecorderView } from './components/FieldRecorderView';
 import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
 import { QtArchitectureGuide } from './components/QtArchitectureGuide';
+import { defaultEngineUrl, EngineClient } from './engine/client';
+import { EngineConnState } from './engine/types';
+import { emptySessionMetadata, mapEngineSession } from './engine/sessionMap';
 
 const TOAST_MS = 3500;
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('record');
   const [channels, setChannels] = useState<ChannelConfig[]>(defaultChannels);
-
-  // 初始载入一份可演示的现场样本（mock）
-  const initialPreset = generateServoAlarmPreset();
   const [sessionMetadata, setSessionMetadata] = useState<CaptureSessionMetadata>(
-    initialPreset.metadata
+    () => emptySessionMetadata()
   );
-  const [recordedPackets, setRecordedPackets] = useState<CapturedPacket[]>(
-    initialPreset.packets
-  );
+  const [recordedPackets, setRecordedPackets] = useState<CapturedPacket[]>([]);
+  const [engineState, setEngineState] = useState<EngineConnState>('disconnected');
 
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const engineRef = useRef<EngineClient | null>(null);
 
   useEffect(() => {
+    const client = new EngineClient(defaultEngineUrl());
+    engineRef.current = client;
+    client.onStateChange = setEngineState;
+    client.start();
     return () => {
+      client.stop();
+      engineRef.current = null;
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
@@ -70,6 +76,8 @@ export default function App() {
 
   const handleClearSession = () => {
     setRecordedPackets([]);
+    setSessionMetadata(emptySessionMetadata());
+    void engineRef.current?.clearSession().catch(() => undefined);
     showToast('已清空当前录制缓冲区');
   };
 
@@ -117,7 +125,7 @@ export default function App() {
     const preset = generateServoAlarmPreset();
     setSessionMetadata(preset.metadata);
     setRecordedPackets(preset.packets);
-    showToast('已载入现场样本：伺服电机突发卡滞过流报警包');
+    showToast('已载入离线演示样本（引擎未参与解析）');
   };
 
   const handleUploadSession = (
@@ -129,15 +137,77 @@ export default function App() {
     showToast(`已成功载入数据包：${metadata.sessionTitle} (${packets.length} 帧)`);
   };
 
+  const handleLoadCaptureFile = async (file: File) => {
+    const engine = engineRef.current;
+    const lower = file.name.toLowerCase();
+
+    if (engine?.connected && (lower.endsWith('.fcap') || !lower.endsWith('.json'))) {
+      try {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        // 二进制 .fcap 以 FCAP magic 开头；旧 JSON 演示包走下方分支
+        const isBinary =
+          buf.length >= 4
+          && buf[0] === 0x46
+          && buf[1] === 0x43
+          && buf[2] === 0x41
+          && buf[3] === 0x50;
+        if (isBinary) {
+          const dto = await engine.loadSessionBytes(buf);
+          const mapped = mapEngineSession(dto);
+          setSessionMetadata(mapped.metadata);
+          setRecordedPackets(mapped.packets);
+          showToast(
+            `已通过引擎载入：${mapped.metadata.sessionTitle}（${mapped.packets.length} 帧）`
+          );
+          return;
+        }
+      } catch (e) {
+        showToast(
+          `引擎载入失败：${e instanceof Error ? e.message : String(e)}`
+        );
+        return;
+      }
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (parsed.metadata && parsed.packets) {
+        const rehydrated = parsed.packets.map(
+          (p: CapturedPacket & { data?: number[] | Record<string, number> }) => ({
+            ...p,
+            data: new Uint8Array(
+              p.data
+                ? Array.isArray(p.data)
+                  ? p.data
+                  : Object.values(p.data)
+                : []
+            ),
+          })
+        );
+        handleUploadSession(parsed.metadata, rehydrated);
+        return;
+      }
+    } catch {
+      /* fallthrough */
+    }
+
+    if (!engine?.connected) {
+      showToast('未连接引擎，且无法按 JSON 演示包解析该文件');
+    } else {
+      showToast('无法识别为二进制 .fcap 或 JSON 演示包');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans antialiased">
       <Header
         currentTab={currentTab}
         onTabChange={setCurrentTab}
         onLoadPreset={handleLoadServoPreset}
+        engineState={engineState}
       />
 
-      {/* Toast：连点会重置计时，避免提前消失 */}
       {notification && (
         <div
           role="status"
@@ -168,6 +238,7 @@ export default function App() {
             sessionMetadata={sessionMetadata}
             packets={recordedPackets}
             onUploadSession={handleUploadSession}
+            onLoadCaptureFile={handleLoadCaptureFile}
             onSelectPacketForInspection={() => setCurrentTab('packets')}
           />
         )}
