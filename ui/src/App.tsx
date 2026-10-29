@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AppTab,
   ChannelConfig,
@@ -13,7 +13,6 @@ import {
 import {
   defaultChannels,
   generateServoAlarmPreset,
-  generateAgvNavigationPreset,
 } from './utils/mockFieldData';
 import { Header } from './components/Header';
 import { FieldRecorderView } from './components/FieldRecorderView';
@@ -21,11 +20,13 @@ import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
 import { QtArchitectureGuide } from './components/QtArchitectureGuide';
 
+const TOAST_MS = 3500;
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('record');
   const [channels, setChannels] = useState<ChannelConfig[]>(defaultChannels);
 
-  // Initialize with realistic preset data
+  // 初始载入一份可演示的现场样本（mock）
   const initialPreset = generateServoAlarmPreset();
   const [sessionMetadata, setSessionMetadata] = useState<CaptureSessionMetadata>(
     initialPreset.metadata
@@ -35,10 +36,21 @@ export default function App() {
   );
 
   const [notification, setNotification] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const showToast = (msg: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setNotification(msg);
-    setTimeout(() => setNotification(null), 3500);
+    toastTimerRef.current = setTimeout(() => {
+      setNotification(null);
+      toastTimerRef.current = null;
+    }, TOAST_MS);
   };
 
   const handleToggleChannel = (id: string) => {
@@ -63,7 +75,6 @@ export default function App() {
 
   const handleExportSession = (metadata: CaptureSessionMetadata) => {
     setSessionMetadata(metadata);
-    // Trigger download of .fcap JSON payload
     const exportBundle = {
       format: 'FCAP-1.0',
       exportedAt: new Date().toISOString(),
@@ -120,22 +131,24 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans antialiased">
-      {/* Top Header */}
       <Header
         currentTab={currentTab}
         onTabChange={setCurrentTab}
         onLoadPreset={handleLoadServoPreset}
       />
 
-      {/* Toast Notification */}
+      {/* Toast：连点会重置计时，避免提前消失 */}
       {notification && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl border border-slate-800 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl border border-slate-800 flex items-center gap-2 max-w-sm"
+        >
+          <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
           <span>{notification}</span>
         </div>
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 pb-16">
         {currentTab === 'record' && (
           <FieldRecorderView
@@ -160,20 +173,16 @@ export default function App() {
         )}
 
         {currentTab === 'packets' && (
-          <PacketsView
-            packets={recordedPackets}
-            onSelectPacket={() => {}}
-          />
+          <PacketsView packets={recordedPackets} onSelectPacket={() => {}} />
         )}
 
         {currentTab === 'qt_guide' && <QtArchitectureGuide />}
       </main>
 
-      {/* Minimal Footer */}
       <footer className="py-4 border-t border-slate-200 text-center text-xs text-slate-500 bg-white">
         <span>FieldReplay · 工业上位机现场数据录制与高保真重演工作台</span>
         <span className="mx-2">·</span>
-        <span>微秒纳秒级时序无漂移记录 · 跨平台 Qt6 / Qt5 对接规范</span>
+        <span>微秒时基无漂移 · 上位机改指向即可对接</span>
       </footer>
     </div>
   );
