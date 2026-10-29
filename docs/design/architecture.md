@@ -90,6 +90,7 @@ UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接
 - 允许：绿色目录内含主 EXE、引擎、内嵌 UI 资源、依赖 DLL（不强制磁盘上物理「唯一一个文件」，但用户感知是「点一个程序就开」）。
 - **壳选型（E6）**：引擎 `serve --ui-dir <ui/dist>` 同端口提供 HTTP 静态页 + 既有 WebSocket 控制面；薄壳（`shell/`，WebView2 / wry）启动时拉起引擎子进程，本机窗口加载 `http://127.0.0.1:17890/`，不把录放热路径迁入 Tauri。
 - **E6b**：`fieldreplay.exe`（壳）查找旁路/`engine/target` 下的 `fieldreplay-engine` 与 `ui/dist`；Windows Job 在壳退出时回收引擎；`--smoke` 仅 HTTP 探活。
+- **E6c**：`tools/pack_green.bat` 产出绿色目录 `pack/FieldReplay/`（主 EXE + 引擎旁路 + `ui/dist`），脚本内 `--smoke` 探活。
 - 开发期仍可用 `ui` 的 Vite 预览，**不算交付形态**。
 - 避免：要求用户先开浏览器再连本地/远程服务作为正式用法。
 

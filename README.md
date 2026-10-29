@@ -6,9 +6,17 @@
 - **实验室**：按时间轴将录制包灌回真实上位机  
 - **交付**：Windows 单入口客户端（双击 EXE 出窗口，不靠系统浏览器）
 
-当前：薄壳 **E6b** 已可用（`shell/` WebView2 拉起引擎）。下一步 **E6c** 绿色目录打包，见 `PROGRESS.md`。
+当前：绿色目录打包 **E6c** 已可用（`tools\pack_green.bat`）。下一步 **E6d** 双击手测验收，见 `PROGRESS.md`。
 
-## 本机窗口（接近交付）
+## 绿色目录打包（交付形态）
+
+```bat
+tools\pack_green.bat
+```
+
+产物：`pack\FieldReplay\`（主 `fieldreplay.exe` + `fieldreplay-engine.exe` + `ui\dist`）。脚本末尾会跑 `--smoke`。双击该目录内主程序即可（需 WebView2 Runtime）。
+
+## 本机窗口（开发期）
 
 ```bat
 cd engine && cargo build

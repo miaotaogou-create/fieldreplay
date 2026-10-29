@@ -27,6 +27,9 @@ shell/target/
 *.exe
 !ui/public/**
 
+# E6c 绿色目录产物（由 tools/pack_green.bat 生成）
+pack/
+
 # 本地试录会话包
 *.fcap
 !docs/**/*.fcap

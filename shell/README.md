@@ -20,6 +20,10 @@ cargo run
 
 可执行文件：`target/debug/fieldreplay.exe`（或 `release`）。
 
+## 绿色目录打包
+
+仓库根执行 `tools\pack_green.bat`：Release 编译引擎与壳、`npm run build` UI，组装到 `pack\FieldReplay\`（布局与下方默认查找路径一致），并跑 `--smoke`。
+
 ## 参数
 
 | 参数 | 说明 |
