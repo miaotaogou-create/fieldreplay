@@ -33,7 +33,7 @@ interface FieldRecorderViewProps {
   recordedPackets: CapturedPacket[];
   onAppendPacket: (packet: CapturedPacket) => void;
   onClearSession: () => void;
-  onExportSession: (metadata: CaptureSessionMetadata) => void;
+  onExportSession: (metadata: CaptureSessionMetadata) => void | Promise<void>;
   onGoToReplay: () => void;
   engineConnected: boolean;
   onEngineStartRecord: (channel: ChannelConfig) => Promise<void>;
@@ -303,8 +303,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       })),
       notes: siteNotes,
     };
-    onExportSession(meta);
     setIsExportModalOpen(false);
+    void Promise.resolve(onExportSession(meta));
   };
 
   return (

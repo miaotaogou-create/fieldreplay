@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { bytesToBase64 } from './bytes';
+import { base64ToBytes, bytesToBase64 } from './bytes';
 import {
   EngineConnState,
   EnginePacketDto,
@@ -15,6 +15,7 @@ import {
   EngineRpcErr,
   EngineRpcOk,
   EngineSessionDto,
+  EngineSessionExportResult,
 } from './types';
 
 const DEFAULT_URL = 'ws://127.0.0.1:17890';
@@ -157,6 +158,19 @@ export class EngineClient {
 
   clearSession(): Promise<void> {
     return this.request('session.clear', {}).then(() => undefined);
+  }
+
+  /** 导出内存会话为二进制 `.fcap`（base64）；可选覆盖 SessionMeta。 */
+  exportSession(meta?: Record<string, unknown>): Promise<EngineSessionExportResult> {
+    const fields: Record<string, unknown> = {};
+    if (meta) fields.meta = meta;
+    return this.request<EngineSessionExportResult>('session.export', fields);
+  }
+
+  /** 导出并解码为字节，供浏览器下载。 */
+  async exportSessionBytes(meta?: Record<string, unknown>): Promise<Uint8Array> {
+    const result = await this.exportSession(meta);
+    return base64ToBytes(result.b64);
   }
 
   startRecord(args: {

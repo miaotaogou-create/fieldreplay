@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::fcap::SessionWriter;
 use crate::mqtt::MqttConfig;
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
@@ -21,6 +20,7 @@ use super::hub::PushHub;
 use super::json_util::{
     err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
 };
+use super::session_file::write_loaded_session;
 use super::state::{ActiveReplay, ControlState, LoadedSession};
 
 pub fn handle_replay_start(
@@ -172,22 +172,8 @@ fn materialize_session(session: &LoadedSession) -> io::Result<PathBuf> {
     let dir = std::env::temp_dir().join("fieldreplay_replay");
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(format!("sess_{ms}.fcap"));
-    write_session_file(&path, session)?;
+    write_loaded_session(&path, session, None)?;
     Ok(path)
-}
-
-fn write_session_file(path: &Path, session: &LoadedSession) -> io::Result<()> {
-    let mut w = SessionWriter::create(
-        path,
-        session.start_wall_unix_us,
-        &session.channels,
-        session.meta_json.as_deref(),
-    )?;
-    for pkt in &session.packets {
-        w.append_packet(pkt)?;
-    }
-    w.finalize()?;
-    Ok(())
 }
 
 fn run_replay(

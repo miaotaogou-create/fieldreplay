@@ -86,3 +86,10 @@ export interface EngineReplayStopResult {
   stopped: boolean;
   sent: number;
 }
+
+export interface EngineSessionExportResult {
+  exported: boolean;
+  packetCount: number;
+  bytes: number;
+  b64: string;
+}

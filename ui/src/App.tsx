@@ -30,6 +30,7 @@ import {
   emptySessionMetadata,
   mapEnginePacket,
   mapEngineSession,
+  metadataToFcapMeta,
 } from './engine/sessionMap';
 import { ReplayConfig } from './types/recorder';
 
@@ -207,8 +208,48 @@ export default function App() {
     showToast('已清空当前录制缓冲区');
   };
 
-  const handleExportSession = (metadata: CaptureSessionMetadata) => {
+  const downloadBlob = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName.endsWith('.fcap') ? fileName : `${fileName}.fcap`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportSession = async (metadata: CaptureSessionMetadata) => {
     setSessionMetadata(metadata);
+    const fileName =
+      metadata.sessionTitle || `现场数据捕获包_${Date.now()}.fcap`;
+    const engine = engineRef.current;
+
+    if (engine?.connected) {
+      try {
+        const bytes = await engine.exportSessionBytes(metadataToFcapMeta(metadata));
+        if (
+          bytes.length < 4
+          || bytes[0] !== 0x46
+          || bytes[1] !== 0x43
+          || bytes[2] !== 0x41
+          || bytes[3] !== 0x50
+        ) {
+          throw new Error('引擎返回内容不是二进制 .fcap');
+        }
+        const ab = new ArrayBuffer(bytes.byteLength);
+        new Uint8Array(ab).set(bytes);
+        downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);
+        showToast('已导出真实二进制 .fcap，可直接发给研发重放');
+        return;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        showToast(`导出失败：${msg}`);
+        return;
+      }
+    }
+
+    // 引擎未连接：离线演示仍下发 JSON 包（后缀 .fcap，仅供 UI 演示）
     const exportBundle = {
       format: 'FCAP-1.0',
       exportedAt: new Date().toISOString(),
@@ -231,20 +272,11 @@ export default function App() {
         data: Array.from(p.data),
       })),
     };
-
-    const blob = new Blob([JSON.stringify(exportBundle, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = metadata.sessionTitle || `现场数据捕获包_${Date.now()}.fcap`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    showToast('现场数据包已打包下载完成 (.fcap)，可直接发送给研发！');
+    downloadBlob(
+      new Blob([JSON.stringify(exportBundle, null, 2)], { type: 'application/json' }),
+      fileName
+    );
+    showToast('已下载离线演示包（JSON）；连接引擎后可导出真实二进制 .fcap');
   };
 
   const handleLoadServoPreset = () => {

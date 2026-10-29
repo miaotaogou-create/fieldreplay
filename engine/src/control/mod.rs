@@ -7,6 +7,7 @@ mod json_util;
 mod live;
 mod replay_live;
 mod server;
+mod session_file;
 mod sha1;
 mod state;
 mod ws;

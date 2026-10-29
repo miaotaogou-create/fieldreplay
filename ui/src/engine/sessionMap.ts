@@ -160,3 +160,16 @@ export function emptySessionMetadata(): CaptureSessionMetadata {
     channels: [],
   };
 }
+
+/** UI 导出会话元数据 → `.fcap` SessionMeta 建议键。 */
+export function metadataToFcapMeta(
+  metadata: CaptureSessionMetadata
+): Record<string, unknown> {
+  return {
+    session_title: metadata.sessionTitle,
+    recorded_by: metadata.recordedBy,
+    site_name: metadata.siteName,
+    device_model: metadata.deviceModel,
+    notes: metadata.notes ?? '',
+  };
+}

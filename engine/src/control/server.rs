@@ -13,9 +13,10 @@ use crate::fcap::{ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionRe
 use super::b64;
 use super::dto::{session_to_json, status_json};
 use super::hub::PushHub;
-use super::json_util::{err_result, escape_str, extract_str, ok_result};
+use super::json_util::{err_result, escape_str, extract_object, extract_str, ok_result};
 use super::live::{handle_record_start, handle_record_stop};
 use super::replay_live::{handle_replay_start, handle_replay_stop};
+use super::session_file::export_session_bytes;
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
     accept_websocket, read_text_frame, write_text_frame as write_text_frame_server,
@@ -139,6 +140,7 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
                 Err(e) => err_result(&id, &e),
             }
         }
+        "session.export" => handle_session_export(&id, msg, state),
         "record.start" => match state.lock() {
             Ok(mut g) => {
                 g.reap_finished_replay();
@@ -186,6 +188,53 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             reply
         }
         other => err_result(&id, &format!("未知 cmd: {other}")),
+    }
+}
+
+/// 将内存会话写成二进制 `.fcap`，经 base64 回传（浏览器可下载）。
+/// 可选 `meta` 对象覆盖 SessionMeta；录制/重放中拒绝。
+fn handle_session_export(
+    id: &str,
+    msg: &str,
+    state: &Arc<Mutex<ControlState>>,
+) -> String {
+    let meta_override = extract_object(msg, "meta");
+    match state.lock() {
+        Ok(mut g) => {
+            g.reap_finished_replay();
+            if g.recording.is_some() {
+                return err_result(id, "录制中无法导出，请先 record.stop");
+            }
+            if g.replaying.is_some() {
+                return err_result(id, "重放中无法导出，请先 replay.stop");
+            }
+            let Some(session) = g.session.as_mut() else {
+                return err_result(id, "无会话可导出，请先录制或 session.open/load");
+            };
+            if session.packets.is_empty() {
+                return err_result(id, "会话无帧，无法导出");
+            }
+            if let Some(ref m) = meta_override {
+                session.meta_json = Some(m.clone());
+            }
+            match export_session_bytes(session, session.meta_json.as_deref()) {
+                Ok((bytes, count)) => {
+                    if bytes.len() < 4 || &bytes[..4] != b"FCAP" {
+                        return err_result(id, "导出校验失败：非 FCAP 魔数");
+                    }
+                    let b64s = b64::encode(&bytes);
+                    ok_result(
+                        id,
+                        &format!(
+                            "{{\"exported\":true,\"packetCount\":{count},\"bytes\":{},\"b64\":\"{b64s}\"}}",
+                            bytes.len()
+                        ),
+                    )
+                }
+                Err(e) => err_result(id, &format!("导出失败: {e}")),
+            }
+        }
+        Err(_) => err_result(id, "状态锁损坏"),
     }
 }
 
@@ -323,9 +372,57 @@ pub fn self_check_control() -> io::Result<()> {
 
     eprintln!("  控制面 WebSocket ping + session.open：通过");
 
+    // E5d：导出二进制 .fcap（魔数 + 帧数往返）
+    self_check_export_via_ws(&mut client)?;
+
     // E5c：先测重放（会话仍是 sample.fcap），再测录制（会覆盖内存会话）
     self_check_replay_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
+    Ok(())
+}
+
+fn self_check_export_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    write_text_frame_client(
+        client,
+        r#"{"id":"e5d","cmd":"session.export","meta":{"session_title":"e5d-export","notes":"self-check"}}"#,
+    )?;
+    let exported = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 session.export 响应")
+    })?;
+    if !exported.contains("\"ok\":true") || !exported.contains("\"exported\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("session.export 失败: {exported}"),
+        ));
+    }
+    let b64s = extract_str(&exported, "b64").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "session.export 缺 b64")
+    })?;
+    let bytes = b64::decode(&b64s).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("export b64 无效: {e}"))
+    })?;
+    if bytes.len() < 4 || &bytes[..4] != b"FCAP" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "export 字节非 FCAP 魔数",
+        ));
+    }
+    let mut reader = SessionReader::open_bytes(bytes)?;
+    let packets = reader.read_all_packets()?;
+    if packets.len() != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("export 往返帧数不对: {}", packets.len()),
+        ));
+    }
+    let meta = reader.meta_json().unwrap_or("");
+    if !meta.contains("e5d-export") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("export meta 未写入: {meta}"),
+        ));
+    }
+    eprintln!("  控制面 session.export 二进制往返：通过");
     Ok(())
 }
 
