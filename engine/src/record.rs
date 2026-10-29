@@ -1,4 +1,4 @@
-//! UDP 录制会话：收包 → 打戳 → 追加 `.fcap`。
+//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 串口）。
 
 use std::io;
 use std::net::SocketAddr;
@@ -11,6 +11,7 @@ use crate::clock::SessionClock;
 use crate::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionWriter,
 };
+use crate::serial::{SerialConfig, SerialPort};
 use crate::udp::{bind_receiver, peer_aux, recv_one};
 
 pub struct RecordOptions {
@@ -103,6 +104,85 @@ pub fn record_udp_for_duration(
         poll_timeout: Duration::from_millis(200),
     };
     record_udp_to_file(&opts, &stop)
+}
+
+pub struct SerialRecordOptions {
+    pub config: SerialConfig,
+    pub out_path: std::path::PathBuf,
+    pub channel_name: String,
+    pub session_title: Option<String>,
+    pub max_duration: Option<Duration>,
+    pub poll_timeout: Duration,
+}
+
+/// 打开实口并录制，直到 `stop` 或超过 `max_duration`。
+pub fn record_serial_to_file(
+    opts: &SerialRecordOptions,
+    stop: &AtomicBool,
+) -> io::Result<u64> {
+    let port = SerialPort::open(&opts.config, opts.poll_timeout)?;
+    record_serial_with_port(opts, stop, &port)
+}
+
+/// 在已打开端口上录制（实口或自检环回）。
+pub fn record_serial_with_port(
+    opts: &SerialRecordOptions,
+    stop: &AtomicBool,
+    port: &SerialPort,
+) -> io::Result<u64> {
+    let clock = SessionClock::start();
+    let channels = [ChannelEntry {
+        channel_index: 0,
+        channel_type: ChannelType::Serial,
+        name: opts.channel_name.clone(),
+        config_json: opts.config.to_config_json(),
+    }];
+    let meta = opts.session_title.as_ref().map(|t| {
+        format!(r#"{{"session_title":{}}}"#, json_string(t))
+    });
+
+    let mut writer = SessionWriter::create(
+        &opts.out_path,
+        clock.start_wall_unix_us(),
+        &channels,
+        meta.as_deref(),
+    )?;
+
+    eprintln!(
+        "录制中：串口 {} @ {} → {}",
+        opts.config.port_name,
+        opts.config.baud,
+        opts.out_path.display()
+    );
+
+    let mut buf = vec![0u8; 4096];
+    while !stop.load(Ordering::SeqCst) {
+        if let Some(max) = opts.max_duration {
+            if clock.relative_us() >= max.as_micros() as u64 {
+                break;
+            }
+        }
+        match port.read(&mut buf)? {
+            Some(n) if n > 0 => {
+                let pkt = PacketRecord {
+                    relative_us: clock.relative_us(),
+                    channel_index: 0,
+                    kind: PacketKind::Data,
+                    direction: 0, // RX
+                    flags: 0,
+                    aux: Vec::new(),
+                    payload: buf[..n].to_vec(),
+                };
+                writer.append_packet(&pkt)?;
+            }
+            _ => continue,
+        }
+    }
+
+    let count = writer.packet_count();
+    writer.finalize()?;
+    eprintln!("录制结束：{count} 帧 → {}", opts.out_path.display());
+    Ok(count)
 }
 
 fn json_string(s: &str) -> String {

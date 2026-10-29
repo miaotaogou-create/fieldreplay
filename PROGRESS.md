@@ -17,12 +17,12 @@
 | 仓库骨架 / docs / 进度本 | 已就绪 |
 | **`ui/` 界面** | U8 通过后已做小抛光（故障标记 + 去掉协议解包 UI）；仍为 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
-| `engine/` 原生引擎 | **E1 已完成**：UDP 录 → `.fcap` → 按时间轴重放（CLI + self-check） |
+| `engine/` 原生引擎 | **E2 已完成**：UDP + 串口录 → `.fcap` → 按时间轴重放（CLI + self-check） |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
 | 二进制 `.fcap` 读写 | **已落地**（`engine` 的 `SessionWriter` / `SessionReader`） |
 | 打包单入口 | 未开始（E6）；普通客户端窗口，见决策 11/13 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E2** 串口录放 |
+| **下一步** | **E3** TCP 角色可配录放 |
 
 ## 已确认决策
 
@@ -51,7 +51,7 @@ fieldreplay/
   docs/requirements/       ← 需求与验收
   docs/design/             ← 架构与格式
   ui/                      ← React 界面（当前主线）
-  engine/                  ← 原生录放引擎（待建）
+  engine/                  ← 原生录放引擎（E2：UDP+串口）
   tests/
 ```
 
@@ -106,8 +106,8 @@ fieldreplay/
 |----|------|------|----------|
 | E0 | 定稿 `.fcap` v1 文档（`docs/design/fcap-format.md`） | [x] | 2026-10-29：小端；64B 头 + 通道表 + 可选 JSON meta + 变长帧；TCP 事件/MQTT topic 进 aux；业务协议不入库 |
 | E1 | 引擎最小闭环：UDP 录 → 写盘 → 按时间轴重放 | [x] | 2026-10-29：Rust 引擎；`record`/`replay`/`self-check`；单元往返 + UDP 环回通过 |
-| E2 | 串口录放 | [ ] ← **当前下一步** | |
-| E3 | TCP 角色可配录放 | [ ] | |
+| E2 | 串口录放 | [x] | 2026-10-29：`serial` Win32 实口 + 内存环回；`record`/`replay --port`；self-check 串口环回通过 |
+| E3 | TCP 角色可配录放 | [ ] ← **当前下一步** | |
 | E4 | MQTT 订阅录 / 发布放 | [ ] | |
 | E5 | UI 去 mock，接本地 IPC/WebSocket | [ ] | |
 | E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [ ] | |
@@ -115,7 +115,7 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E2**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E3**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
 3. 界面 U 阶段已收口；`.fcap` 契约见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
@@ -136,3 +136,4 @@ fieldreplay/
 | 2026-10-29 | 定稿 `.fcap` v1（E0） | 引擎读写契约；解 G2；对接说明示意与文档对齐 |
 | 2026-10-29 | 再强调：单 EXE 双击 = 普通客户端窗口，不经系统浏览器 | 用户新会话明确最终目标 |
 | 2026-10-29 | **引擎语言选 Rust**（仅标准库做 E1；无 Tokio/额外 crate） | 本机已有 cargo；热路径原生；利于后续 Tauri/单入口；Winsock 经 std::net 足够 UDP |
+| 2026-10-29 | E2 串口仍仅标准库：Windows 手写 Win32 FFI；自检用内存环回 | 不引入 serialport 等 crate；无虚口时仍可验录放路径；实口手测靠 COM/虚拟对 |
