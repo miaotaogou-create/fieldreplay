@@ -1,0 +1,6 @@
+{
+  "name": "FieldReplay - 上位机现场数据录制与高保真重演工作台",
+  "description": "面向工业现场与Qt上位机开发的独立轻量级数据录制与时序重演工具。现场一键无损录制串口/网口/视频流，研发端原速/倍速高保真回放调试。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
