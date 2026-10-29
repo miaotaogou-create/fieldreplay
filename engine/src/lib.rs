@@ -21,8 +21,10 @@ pub use mqtt::{
     MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
 };
 pub use record::{
-    record_mqtt_to_file, record_serial_to_file, record_serial_with_port, record_tcp_to_file,
-    record_udp_to_file, MqttRecordOptions, RecordOptions, SerialRecordOptions, TcpRecordOptions,
+    record_mqtt_to_file, record_mqtt_to_file_with, record_serial_to_file,
+    record_serial_to_file_with, record_serial_with_port, record_serial_with_port_with,
+    record_tcp_to_file, record_tcp_to_file_with, record_udp_to_file, record_udp_to_file_with,
+    MqttRecordOptions, OnPacket, RecordOptions, SerialRecordOptions, TcpRecordOptions,
 };
 pub use replay::{
     replay_mqtt_from_file, replay_serial_from_file, replay_serial_with_port, replay_tcp_from_file,

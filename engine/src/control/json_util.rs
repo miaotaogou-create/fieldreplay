@@ -16,11 +16,15 @@ pub fn escape_str(s: &str) -> String {
     out
 }
 
-pub fn extract_str(json: &str, key: &str) -> Option<String> {
+fn after_key<'a>(json: &'a str, key: &str) -> Option<&'a str> {
     let needle = format!("\"{key}\"");
     let i = json.find(&needle)?;
     let after = &json[i + needle.len()..];
-    let after = after.trim_start_matches(|c: char| c == ':' || c.is_whitespace());
+    Some(after.trim_start_matches(|c: char| c == ':' || c.is_whitespace()))
+}
+
+pub fn extract_str(json: &str, key: &str) -> Option<String> {
+    let after = after_key(json, key)?;
     if !after.starts_with('"') {
         return None;
     }
@@ -46,6 +50,53 @@ pub fn extract_str(json: &str, key: &str) -> Option<String> {
             },
             '"' => return Some(out),
             c => out.push(c),
+        }
+    }
+    None
+}
+
+/// 抽取 JSON 数字字段（整数）。
+pub fn extract_u64(json: &str, key: &str) -> Option<u64> {
+    let after = after_key(json, key)?;
+    let end = after
+        .find(|c: char| !(c.is_ascii_digit()))
+        .unwrap_or(after.len());
+    if end == 0 {
+        return None;
+    }
+    after[..end].parse().ok()
+}
+
+/// 抽取嵌套对象的原始子串（含首尾大括号）。
+pub fn extract_object(json: &str, key: &str) -> Option<String> {
+    let after = after_key(json, key)?;
+    if !after.starts_with('{') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, c) in after.char_indices() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_str = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(after[..=i].to_string());
+                }
+            }
+            _ => {}
         }
     }
     None

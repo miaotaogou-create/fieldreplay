@@ -35,6 +35,10 @@ interface FieldRecorderViewProps {
   onClearSession: () => void;
   onExportSession: (metadata: CaptureSessionMetadata) => void;
   onGoToReplay: () => void;
+  engineConnected: boolean;
+  onEngineStartRecord: (channel: ChannelConfig) => Promise<void>;
+  onEngineStopRecord: () => Promise<unknown>;
+  pickRecordChannel: (channels: ChannelConfig[]) => ChannelConfig | null;
 }
 
 export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
@@ -46,10 +50,21 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   onClearSession,
   onExportSession,
   onGoToReplay,
+  engineConnected,
+  onEngineStartRecord,
+  onEngineStopRecord,
+  pickRecordChannel,
 }) => {
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'paused'>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [simulateHardwareStream, setSimulateHardwareStream] = useState(true);
+  // 引擎已连接时默认关模拟；未连接时保留离线演示
+  const [simulateHardwareStream, setSimulateHardwareStream] = useState(!engineConnected);
+  const [busy, setBusy] = useState(false);
+  const [localHint, setLocalHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (engineConnected) setSimulateHardwareStream(false);
+  }, [engineConnected]);
   const [siteNotes, setSiteNotes] = useState('现场3号工位伺服偶现卡顿，录制10分钟正常及突发异常报文。');
   const [recordedBy, setRecordedBy] = useState('现场调试员-张工');
   const [siteLocation, setSiteLocation] = useState('苏州二厂自动化冲压车间');
@@ -79,10 +94,14 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     return () => clearInterval(timer);
   }, [recordState]);
 
-  // Hardware simulation packet generator
+  // 仅离线演示：引擎未连接时才跑 mock 发包
   useEffect(() => {
     let packetTimer: any;
-    if (recordState === 'recording' && simulateHardwareStream) {
+    if (
+      recordState === 'recording'
+      && simulateHardwareStream
+      && !engineConnected
+    ) {
       let counter = recordedPackets.length + 1;
       packetTimer = setInterval(() => {
         const nowUs = elapsedMs * 1000 + Math.floor(Math.random() * 500);
@@ -133,7 +152,15 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       }, 200);
     }
     return () => clearInterval(packetTimer);
-  }, [recordState, simulateHardwareStream, elapsedMs, channels, recordedPackets.length]);
+  }, [
+    recordState,
+    simulateHardwareStream,
+    engineConnected,
+    elapsedMs,
+    channels,
+    recordedPackets.length,
+    onAppendPacket,
+  ]);
 
   // 有新报文且开启「锁定最新」时滚到底
   useEffect(() => {
@@ -150,15 +177,51 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     if (!nearBottom && autoScroll) setAutoScroll(false);
   };
 
-  const handleStartRecord = () => {
+  const handleStartRecord = async () => {
+    if (engineConnected) {
+      const ch = pickRecordChannel(channels);
+      if (!ch) {
+        setLocalHint('请至少启用一个 UDP / 串口 / TCP / MQTT 通道');
+        return;
+      }
+      setBusy(true);
+      setLocalHint(null);
+      try {
+        await onEngineStartRecord(ch);
+        setElapsedMs(0);
+        setRecordState('recording');
+      } catch (e) {
+        setLocalHint(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setRecordState('recording');
   };
 
   const handlePauseRecord = () => {
+    if (engineConnected) {
+      setLocalHint('真实引擎录制暂不支持暂停，请直接停止');
+      return;
+    }
     setRecordState('paused');
   };
 
-  const handleStopAndPackage = () => {
+  const handleStopAndPackage = async () => {
+    if (engineConnected && recordState !== 'idle') {
+      setBusy(true);
+      try {
+        await onEngineStopRecord();
+        setRecordState('idle');
+        setIsExportModalOpen(true);
+      } catch (e) {
+        setLocalHint(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setRecordState('idle');
     setIsExportModalOpen(true);
   };
@@ -373,26 +436,36 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           <div className="flex items-center gap-3">
             {recordState === 'idle' ? (
               <button
-                onClick={handleStartRecord}
-                className="flex items-center gap-2.5 px-6 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-semibold text-sm shadow-md transition-all active:scale-98"
+                onClick={() => void handleStartRecord()}
+                disabled={busy}
+                className="flex items-center gap-2.5 px-6 py-3 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg font-semibold text-sm shadow-md transition-all active:scale-98"
               >
                 <span className="w-2.5 h-2.5 rounded-full bg-white" />
-                <span>开始现场录制</span>
+                <span>
+                  {engineConnected ? '开始引擎录制' : '开始现场录制'}
+                </span>
               </button>
             ) : (
               <>
                 {recordState === 'recording' ? (
                   <button
                     onClick={handlePauseRecord}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition-colors"
+                    disabled={busy || engineConnected}
+                    title={
+                      engineConnected
+                        ? '真实录制暂不支持暂停'
+                        : undefined
+                    }
+                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition-colors"
                   >
                     <Pause className="w-4 h-4 text-amber-400" />
                     <span>暂停</span>
                   </button>
                 ) : (
                   <button
-                    onClick={handleStartRecord}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-medium transition-colors"
+                    onClick={() => void handleStartRecord()}
+                    disabled={busy}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
                   >
                     <Play className="w-4 h-4" />
                     <span>继续</span>
@@ -400,8 +473,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 )}
 
                 <button
-                  onClick={handleStopAndPackage}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold shadow-md transition-all"
+                  onClick={() => void handleStopAndPackage()}
+                  disabled={busy}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-md transition-all"
                 >
                   <Square className="w-3.5 h-3.5 fill-white" />
                   <span>停止并打包导出</span>
@@ -443,23 +517,36 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           </div>
         </div>
 
-        {/* Live Simulation Banner (To allow immediate testing) */}
-        <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-400">硬件测试信号发生器：</span>
-            <button
-              onClick={() => setSimulateHardwareStream(!simulateHardwareStream)}
-              className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
-                simulateHardwareStream
-                  ? 'bg-sky-950 text-sky-400 border border-sky-800'
-                  : 'bg-slate-800 text-slate-400'
-              }`}
-            >
-              {simulateHardwareStream ? '● 模拟PLC/雷达设备流运行中' : '○ 已停止硬件模拟'}
-            </button>
-            <span className="text-slate-500 text-[11px]">
-              (在网页端即可实时体验现场硬件持续发数据)
-            </span>
+        {/* 引擎状态 / 离线模拟条 */}
+        <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {engineConnected ? (
+              <span className="px-2.5 py-1 rounded text-[11px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
+                ● 引擎已连接 · 启停走真实通道（取首个已启用通道）
+              </span>
+            ) : (
+              <>
+                <span className="text-slate-400">硬件测试信号发生器：</span>
+                <button
+                  onClick={() => setSimulateHardwareStream(!simulateHardwareStream)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-medium transition-colors ${
+                    simulateHardwareStream
+                      ? 'bg-sky-950 text-sky-400 border border-sky-800'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {simulateHardwareStream
+                    ? '● 模拟PLC/雷达设备流运行中'
+                    : '○ 已停止硬件模拟'}
+                </button>
+                <span className="text-slate-500 text-[11px]">
+                  （引擎未连接时的离线演示）
+                </span>
+              </>
+            )}
+            {localHint && (
+              <span className="text-amber-400 text-[11px]">{localHint}</span>
+            )}
           </div>
 
           <div className="flex items-center gap-3">

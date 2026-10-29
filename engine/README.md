@@ -1,6 +1,6 @@
 # FieldReplay 引擎
 
-原生录放热路径（Rust，仅标准库）。当前完成 **E5a**：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面（供 UI 载入真实 `.fcap`）。
+原生录放热路径（Rust，仅标准库）。当前完成 **E5b**：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面（载入 `.fcap` + `record.start`/`stop` 预览推送）。
 
 格式契约：[`../docs/design/fcap-format.md`](../docs/design/fcap-format.md)。
 
@@ -60,7 +60,7 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix
 | `tcp` | 角色 server/client；连接事件 + 字节流 |
 | `mqtt` | 最小 MQTT 3.1.1 客户端；自检迷你 Broker |
 | `record` / `replay` | UDP / 串口 / TCP / MQTT 会话闭环 |
-| `control` | 本机 WebSocket 控制面（ping / status / session.load\|open\|clear） |
+| `control` | 本机 WebSocket 控制面（session.* + record.start\|stop + 预览推送） |
 | `main` | CLI |
 
 ## 自检

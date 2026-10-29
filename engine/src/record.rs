@@ -19,6 +19,21 @@ use crate::tcp::{
 };
 use crate::udp::{bind_receiver, peer_aux, recv_one};
 
+/// 每写入一帧时可选回调（控制面预览推送）。
+pub type OnPacket<'a> = Option<&'a mut dyn FnMut(&PacketRecord)>;
+
+fn write_packet(
+    writer: &mut SessionWriter,
+    pkt: &PacketRecord,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<()> {
+    writer.append_packet(pkt)?;
+    if let Some(cb) = on_packet.as_mut() {
+        cb(pkt);
+    }
+    Ok(())
+}
+
 pub struct RecordOptions {
     pub bind: SocketAddr,
     pub out_path: std::path::PathBuf,
@@ -32,6 +47,15 @@ pub struct RecordOptions {
 
 /// 录制直到 `stop` 置位或超过 `max_duration`。
 pub fn record_udp_to_file(opts: &RecordOptions, stop: &AtomicBool) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_udp_to_file_with(opts, stop, &mut none)
+}
+
+pub fn record_udp_to_file_with(
+    opts: &RecordOptions,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
     let clock = SessionClock::start();
     let config_json = format!(
         r#"{{"bind_ip":"{}","bind_port":{},"peer_ip":"","peer_port":0}}"#,
@@ -81,7 +105,7 @@ pub fn record_udp_to_file(opts: &RecordOptions, stop: &AtomicBool) -> io::Result
                     aux: peer_aux(peer),
                     payload: buf[..n].to_vec(),
                 };
-                writer.append_packet(&pkt)?;
+                write_packet(&mut writer, &pkt, on_packet)?;
             }
             None => continue,
         }
@@ -125,8 +149,17 @@ pub fn record_serial_to_file(
     opts: &SerialRecordOptions,
     stop: &AtomicBool,
 ) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_serial_to_file_with(opts, stop, &mut none)
+}
+
+pub fn record_serial_to_file_with(
+    opts: &SerialRecordOptions,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
     let port = SerialPort::open(&opts.config, opts.poll_timeout)?;
-    record_serial_with_port(opts, stop, &port)
+    record_serial_with_port_with(opts, stop, &port, on_packet)
 }
 
 /// 在已打开端口上录制（实口或自检环回）。
@@ -134,6 +167,16 @@ pub fn record_serial_with_port(
     opts: &SerialRecordOptions,
     stop: &AtomicBool,
     port: &SerialPort,
+) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_serial_with_port_with(opts, stop, port, &mut none)
+}
+
+pub fn record_serial_with_port_with(
+    opts: &SerialRecordOptions,
+    stop: &AtomicBool,
+    port: &SerialPort,
+    on_packet: &mut OnPacket<'_>,
 ) -> io::Result<u64> {
     let clock = SessionClock::start();
     let channels = [ChannelEntry {
@@ -178,7 +221,7 @@ pub fn record_serial_with_port(
                     aux: Vec::new(),
                     payload: buf[..n].to_vec(),
                 };
-                writer.append_packet(&pkt)?;
+                write_packet(&mut writer, &pkt, on_packet)?;
             }
             _ => continue,
         }
@@ -201,6 +244,15 @@ pub struct TcpRecordOptions {
 
 /// 按配置角色建立 TCP 连接并录制（连接事件 + RX 字节流），直到 `stop` / 时长 / 对端断开。
 pub fn record_tcp_to_file(opts: &TcpRecordOptions, stop: &AtomicBool) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_tcp_to_file_with(opts, stop, &mut none)
+}
+
+pub fn record_tcp_to_file_with(
+    opts: &TcpRecordOptions,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
     let clock = SessionClock::start();
     let channels = [ChannelEntry {
         channel_index: 0,
@@ -235,21 +287,28 @@ pub fn record_tcp_to_file(opts: &TcpRecordOptions, stop: &AtomicBool) -> io::Res
             eprintln!("TCP 等待接入：{local}");
             match accept_until(&listener, stop, opts.poll_timeout)? {
                 Some((stream, peer)) => {
-                    writer.append_packet(&PacketRecord {
-                        relative_us: clock.relative_us(),
-                        channel_index: 0,
-                        kind: PacketKind::TcpConnect,
-                        direction: 0,
-                        flags: 0,
-                        aux: tcp_peer_aux(peer),
-                        payload: Vec::new(),
-                    })?;
+                    write_packet(
+                        &mut writer,
+                        &PacketRecord {
+                            relative_us: clock.relative_us(),
+                            channel_index: 0,
+                            kind: PacketKind::TcpConnect,
+                            direction: 0,
+                            flags: 0,
+                            aux: tcp_peer_aux(peer),
+                            payload: Vec::new(),
+                        },
+                        on_packet,
+                    )?;
                     stream
                 }
                 None => {
                     let count = writer.packet_count();
                     writer.finalize()?;
-                    eprintln!("录制结束（未建立连接）：{count} 帧 → {}", opts.out_path.display());
+                    eprintln!(
+                        "录制结束（未建立连接）：{count} 帧 → {}",
+                        opts.out_path.display()
+                    );
                     return Ok(count);
                 }
             }
@@ -258,15 +317,19 @@ pub fn record_tcp_to_file(opts: &TcpRecordOptions, stop: &AtomicBool) -> io::Res
             let addr = opts.config.socket_addr()?;
             let stream = connect(addr, opts.poll_timeout)?;
             let peer = stream.peer_addr().unwrap_or(addr);
-            writer.append_packet(&PacketRecord {
-                relative_us: clock.relative_us(),
-                channel_index: 0,
-                kind: PacketKind::TcpConnect,
-                direction: 1, // 工具主动连出
-                flags: 0,
-                aux: tcp_peer_aux(peer),
-                payload: Vec::new(),
-            })?;
+            write_packet(
+                &mut writer,
+                &PacketRecord {
+                    relative_us: clock.relative_us(),
+                    channel_index: 0,
+                    kind: PacketKind::TcpConnect,
+                    direction: 1, // 工具主动连出
+                    flags: 0,
+                    aux: tcp_peer_aux(peer),
+                    payload: Vec::new(),
+                },
+                on_packet,
+            )?;
             stream
         }
     };
@@ -281,42 +344,54 @@ pub fn record_tcp_to_file(opts: &TcpRecordOptions, stop: &AtomicBool) -> io::Res
         }
         match read_some(&stream, &mut buf)? {
             ReadOutcome::Data(n) => {
-                writer.append_packet(&PacketRecord {
-                    relative_us: clock.relative_us(),
-                    channel_index: 0,
-                    kind: PacketKind::Data,
-                    direction: 0, // RX
-                    flags: 0,
-                    aux: Vec::new(),
-                    payload: buf[..n].to_vec(),
-                })?;
+                write_packet(
+                    &mut writer,
+                    &PacketRecord {
+                        relative_us: clock.relative_us(),
+                        channel_index: 0,
+                        kind: PacketKind::Data,
+                        direction: 0, // RX
+                        flags: 0,
+                        aux: Vec::new(),
+                        payload: buf[..n].to_vec(),
+                    },
+                    on_packet,
+                )?;
             }
             ReadOutcome::Timeout => continue,
             ReadOutcome::Eof => {
                 eof = true;
-                writer.append_packet(&PacketRecord {
-                    relative_us: clock.relative_us(),
-                    channel_index: 0,
-                    kind: PacketKind::TcpDisconnect,
-                    direction: 0,
-                    flags: 0,
-                    aux: b"eof".to_vec(),
-                    payload: Vec::new(),
-                })?;
+                write_packet(
+                    &mut writer,
+                    &PacketRecord {
+                        relative_us: clock.relative_us(),
+                        channel_index: 0,
+                        kind: PacketKind::TcpDisconnect,
+                        direction: 0,
+                        flags: 0,
+                        aux: b"eof".to_vec(),
+                        payload: Vec::new(),
+                    },
+                    on_packet,
+                )?;
             }
         }
     }
 
     if !eof {
-        writer.append_packet(&PacketRecord {
-            relative_us: clock.relative_us(),
-            channel_index: 0,
-            kind: PacketKind::TcpDisconnect,
-            direction: 1,
-            flags: 0,
-            aux: b"stop".to_vec(),
-            payload: Vec::new(),
-        })?;
+        write_packet(
+            &mut writer,
+            &PacketRecord {
+                relative_us: clock.relative_us(),
+                channel_index: 0,
+                kind: PacketKind::TcpDisconnect,
+                direction: 1,
+                flags: 0,
+                aux: b"stop".to_vec(),
+                payload: Vec::new(),
+            },
+            on_packet,
+        )?;
         // 主动收尾：丢弃 stream 以关闭连接
         drop(stream);
     }
@@ -338,6 +413,15 @@ pub struct MqttRecordOptions {
 
 /// 连接 Broker 订阅，把入站 PUBLISH 落盘（topic→aux，payload→payload）。
 pub fn record_mqtt_to_file(opts: &MqttRecordOptions, stop: &AtomicBool) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_mqtt_to_file_with(opts, stop, &mut none)
+}
+
+pub fn record_mqtt_to_file_with(
+    opts: &MqttRecordOptions,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
     let clock = SessionClock::start();
     let channels = [ChannelEntry {
         channel_index: 0,
@@ -376,15 +460,19 @@ pub fn record_mqtt_to_file(opts: &MqttRecordOptions, stop: &AtomicBool) -> io::R
         }
         match client.poll_publish(stop)? {
             Some(msg) => {
-                writer.append_packet(&PacketRecord {
-                    relative_us: clock.relative_us(),
-                    channel_index: 0,
-                    kind: PacketKind::Data,
-                    direction: 0, // RX
-                    flags: pack_mqtt_flags(msg.qos, msg.retain),
-                    aux: msg.topic.into_bytes(),
-                    payload: msg.payload,
-                })?;
+                write_packet(
+                    &mut writer,
+                    &PacketRecord {
+                        relative_us: clock.relative_us(),
+                        channel_index: 0,
+                        kind: PacketKind::Data,
+                        direction: 0, // RX
+                        flags: pack_mqtt_flags(msg.qos, msg.retain),
+                        aux: msg.topic.into_bytes(),
+                        payload: msg.payload,
+                    },
+                    on_packet,
+                )?;
             }
             None => continue,
         }

@@ -48,3 +48,25 @@ export interface EngineRpcErr {
   ok: false;
   error: string;
 }
+
+/** 无 id 的服务端推送（如录制预览帧）。 */
+export interface EnginePushEvent {
+  event: string;
+  packet?: EnginePacketDto;
+  error?: string;
+}
+
+export interface EngineRecordStartResult {
+  started: boolean;
+  out: string;
+  channel: EngineChannelDto;
+}
+
+export interface EngineRecordStopResult {
+  stopped: boolean;
+  out: string;
+  packetCount: number;
+  durationUs: number;
+  finalized: boolean;
+  warning?: string;
+}

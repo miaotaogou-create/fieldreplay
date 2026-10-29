@@ -19,9 +19,14 @@ import { FieldRecorderView } from './components/FieldRecorderView';
 import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
 import { QtArchitectureGuide } from './components/QtArchitectureGuide';
+import { channelToEngineConfig, pickRecordChannel } from './engine/channelConfig';
 import { defaultEngineUrl, EngineClient } from './engine/client';
 import { EngineConnState } from './engine/types';
-import { emptySessionMetadata, mapEngineSession } from './engine/sessionMap';
+import {
+  emptySessionMetadata,
+  mapEnginePacket,
+  mapEngineSession,
+} from './engine/sessionMap';
 
 const TOAST_MS = 3500;
 
@@ -36,19 +41,14 @@ export default function App() {
 
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastFnRef = useRef<(msg: string) => void>(() => {});
   const engineRef = useRef<EngineClient | null>(null);
-
-  useEffect(() => {
-    const client = new EngineClient(defaultEngineUrl());
-    engineRef.current = client;
-    client.onStateChange = setEngineState;
-    client.start();
-    return () => {
-      client.stop();
-      engineRef.current = null;
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    };
-  }, []);
+  const liveChannelRef = useRef<{
+    id: string;
+    name: string;
+    type: ChannelConfig['type'];
+  } | null>(null);
+  const recordStartWallUsRef = useRef(0);
 
   const showToast = (msg: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -58,6 +58,37 @@ export default function App() {
       toastTimerRef.current = null;
     }, TOAST_MS);
   };
+  toastFnRef.current = showToast;
+
+  useEffect(() => {
+    const client = new EngineClient(defaultEngineUrl());
+    engineRef.current = client;
+    client.onStateChange = setEngineState;
+    client.onEvent = (ev) => {
+      if (ev.event === 'record.packet' && ev.packet) {
+        const ch = liveChannelRef.current ?? {
+          id: `ch_${ev.packet.ch}`,
+          name: `通道 ${ev.packet.ch}`,
+          type: 'udp' as const,
+        };
+        const mapped = mapEnginePacket(
+          ev.packet,
+          ch,
+          recordStartWallUsRef.current
+        );
+        setRecordedPackets((prev) => [...prev, mapped]);
+      } else if (ev.event === 'record.error' && ev.error) {
+        toastFnRef.current(`录制错误：${ev.error}`);
+      }
+    };
+    client.start();
+    return () => {
+      client.onEvent = null;
+      client.stop();
+      engineRef.current = null;
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const handleToggleChannel = (id: string) => {
     setChannels((prev) =>
@@ -72,6 +103,41 @@ export default function App() {
 
   const handleAppendPacket = (packet: CapturedPacket) => {
     setRecordedPackets((prev) => [...prev, packet]);
+  };
+
+  const handleEngineStartRecord = async (channel: ChannelConfig) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const config = channelToEngineConfig(channel);
+    liveChannelRef.current = {
+      id: channel.id,
+      name: channel.name,
+      type: channel.type,
+    };
+    recordStartWallUsRef.current = Date.now() * 1000;
+    setRecordedPackets([]);
+    await engine.startRecord({
+      type: channel.type,
+      name: channel.name,
+      sessionTitle: `现场录制-${channel.name}`,
+      config,
+    });
+    showToast(`已开始真实录制：${channel.name}（${channel.type}）`);
+  };
+
+  const handleEngineStopRecord = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.stopRecord();
+    liveChannelRef.current = null;
+    showToast(
+      `录制已停止：${result.packetCount} 帧已写入 ${result.out.split(/[/\\]/).pop()}`
+    );
+    return result;
   };
 
   const handleClearSession = () => {
@@ -230,6 +296,10 @@ export default function App() {
             onClearSession={handleClearSession}
             onExportSession={handleExportSession}
             onGoToReplay={() => setCurrentTab('replay')}
+            engineConnected={engineState === 'connected'}
+            onEngineStartRecord={handleEngineStartRecord}
+            onEngineStopRecord={handleEngineStopRecord}
+            pickRecordChannel={pickRecordChannel}
           />
         )}
 

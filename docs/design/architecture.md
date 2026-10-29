@@ -42,8 +42,8 @@
 | Clock | 录制起点、相对微秒时间戳 |
 | SessionWriter / Reader | `.fcap`（或确定后的格式）顺序写、顺序/索引读 |
 | Scheduler | 重放按 `relative_us` 发事件 |
-| Control API | 开始/停止/载入/导出；供 UI 调用 |
-| UI | `ui/` 现有页面，后续接 Control API |
+| Control API | 本机 WebSocket（默认 `127.0.0.1:17890`）；供 UI 调用 |
+| UI | `ui/` 现有页面，经控制面载入会话 / 启停录制 |
 
 ## TCP 角色
 
@@ -63,6 +63,19 @@
 | 重放 | 连接 Broker（或实验室 Broker），按时间轴 **发布** 已录 payload（演设备/传感器） |
 
 落盘至少包括：`relative_us`、`topic`、`payload` 原始字节；QoS/retain 作为元数据可选保存。不解析 payload 业务含义。
+
+## 控制面命令（E5）
+
+开发期：`cargo run -- serve`；UI 经 `ws://127.0.0.1:17890` 连接。
+
+| cmd | 作用 |
+|-----|------|
+| `ping` / `status` | 探活；`status.state` 为 `idle` \| `recording` |
+| `session.open` / `session.load` / `session.clear` | 载入/清空内存会话（E5a） |
+| `record.start` | 启真实通道录制：`type` + `config`（与 `.fcap` config_json 对齐）；可选 `out` / `name` / `sessionTitle`。同时刻一路。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`） |
+| `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
+
+重放控制（`replay.*`）属 E5c；导出二进制收口属 E5d。
 
 ## 会话文件
 

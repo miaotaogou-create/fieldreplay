@@ -10,7 +10,7 @@ import {
 } from '../types/recorder';
 import { bytesToAscii, bytesToHex } from '../utils/mockFieldData';
 import { base64ToBytes } from './bytes';
-import { EngineSessionDto } from './types';
+import { EnginePacketDto, EngineSessionDto } from './types';
 
 const CHANNEL_COLORS = ['#0284c7', '#059669', '#d97706', '#0d9488', '#7c3aed'];
 
@@ -113,6 +113,38 @@ export function mapEngineSession(dto: EngineSessionDto): {
   };
 
   return { metadata, packets };
+}
+
+/** 将引擎推送的单帧映射为 UI 报文（E5b 预览）。 */
+export function mapEnginePacket(
+  p: EnginePacketDto,
+  channel: { id: string; name: string; type: ChannelType },
+  startWallUnixUs = 0
+): CapturedPacket {
+  const data = base64ToBytes(p.payloadB64 || '');
+  const absMs = startWallUnixUs
+    ? Math.floor(startWallUnixUs / 1000) + Math.floor(p.us / 1000)
+    : Date.now();
+  const pkt: CapturedPacket = {
+    id: p.i + 1,
+    timestampUs: p.us,
+    absoluteTime: new Date(absMs).toISOString(),
+    channelId: channel.id,
+    channelName: channel.name,
+    channelType: channel.type,
+    direction: p.dir === 1 ? 'TX' : 'RX',
+    length: data.length,
+    data,
+    hexPreview: bytesToHex(data),
+    asciiPreview: bytesToAscii(data),
+    hasError: p.kind === 3,
+  };
+  if (channel.type === 'mqtt') {
+    pkt.mqttTopic = p.topic || undefined;
+    pkt.mqttQoS = p.qos;
+    pkt.protocolHint = 'MQTT-Message';
+  }
+  return pkt;
 }
 
 export function emptySessionMetadata(): CaptureSessionMetadata {

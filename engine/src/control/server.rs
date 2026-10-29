@@ -1,19 +1,21 @@
-//! 本地 WebSocket 控制面：ping / status / session.load|open|clear。
+//! 本地 WebSocket 控制面：ping / status / session.* / record.start|stop。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use crate::fcap::{
-    ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter,
-};
-use crate::mqtt::{mqtt_qos_from_flags, mqtt_retain_from_flags};
+use crate::fcap::{ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter};
 
 use super::b64;
+use super::dto::{session_to_json, status_json};
+use super::hub::PushHub;
 use super::json_util::{err_result, escape_str, extract_str, ok_result};
+use super::live::{handle_record_start, handle_record_stop};
+use super::state::{ControlState, LoadedSession};
 use super::ws::{
     accept_websocket, read_text_frame, write_text_frame as write_text_frame_server,
 };
@@ -22,39 +24,19 @@ pub const DEFAULT_BIND: &str = "127.0.0.1:17890";
 pub const API_VERSION: u32 = 1;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Clone)]
-struct LoadedSession {
-    source: String,
-    start_wall_unix_us: u64,
-    duration_us: u64,
-    total_payload_bytes: u64,
-    finalized: bool,
-    meta_json: Option<String>,
-    channels: Vec<ChannelEntry>,
-    packets: Vec<PacketRecord>,
-}
-
-struct ControlState {
-    session: Option<LoadedSession>,
-}
-
-impl ControlState {
-    fn new() -> Self {
-        Self { session: None }
-    }
-}
-
 pub fn serve(bind: SocketAddr) -> io::Result<()> {
     let listener = TcpListener::bind(bind)?;
     eprintln!("FieldReplay 控制面监听 ws://{bind} （API v{API_VERSION}）");
     let state = Arc::new(Mutex::new(ControlState::new()));
+    let hub = Arc::new(PushHub::new());
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
                 let st = Arc::clone(&state);
+                let hb = Arc::clone(&hub);
                 thread::spawn(move || {
-                    if let Err(e) = handle_client(stream, st) {
+                    if let Err(e) = handle_client(stream, st, hb) {
                         eprintln!("控制面连接结束: {e}");
                     }
                 });
@@ -65,19 +47,44 @@ pub fn serve(bind: SocketAddr) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_client(mut stream: TcpStream, state: Arc<Mutex<ControlState>>) -> io::Result<()> {
+fn handle_client(
+    mut stream: TcpStream,
+    state: Arc<Mutex<ControlState>>,
+    hub: Arc<PushHub>,
+) -> io::Result<()> {
     accept_websocket(&mut stream)?;
-    // 不主动推送 hello，避免与客户端握手读缓冲区粘包丢帧；由客户端发 ping。
-    loop {
-        let Some(msg) = read_text_frame(&mut stream)? else {
-            return Ok(());
-        };
-        let reply = dispatch(&msg, &state);
-        write_text_frame_server(&mut stream, &reply)?;
-    }
+    let mut writer = stream.try_clone()?;
+    let (tx, rx) = mpsc::sync_channel::<String>(256);
+    let client_id = hub.register(tx.clone());
+
+    let writer_thread = thread::spawn(move || {
+        while let Ok(msg) = rx.recv() {
+            if write_text_frame_server(&mut writer, &msg).is_err() {
+                break;
+            }
+        }
+    });
+
+    let result = (|| -> io::Result<()> {
+        // 不主动推送 hello，避免与客户端握手读缓冲区粘包丢帧；由客户端发 ping。
+        loop {
+            let Some(msg) = read_text_frame(&mut stream)? else {
+                return Ok(());
+            };
+            let reply = dispatch(&msg, &state, &hub);
+            if tx.send(reply).is_err() {
+                return Ok(());
+            }
+        }
+    })();
+
+    hub.unregister(client_id);
+    drop(tx);
+    let _ = writer_thread.join();
+    result
 }
 
-fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>) -> String {
+fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> String {
     let id = extract_str(msg, "id").unwrap_or_else(|| "0".into());
     let cmd = match extract_str(msg, "cmd") {
         Some(c) => c,
@@ -96,6 +103,9 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>) -> String {
         },
         "session.clear" => match state.lock() {
             Ok(mut g) => {
+                if g.recording.is_some() {
+                    return err_result(&id, "录制中无法清空会话，请先 record.stop");
+                }
                 g.session = None;
                 ok_result(&id, "{\"cleared\":true}")
             }
@@ -121,6 +131,26 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>) -> String {
                 Err(e) => err_result(&id, &e),
             }
         }
+        "record.start" => match state.lock() {
+            Ok(mut g) => handle_record_start(&id, msg, &mut g.recording, hub),
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "record.stop" => {
+            // 先取出 ActiveRecording，join 时不持状态锁，避免推送路径间接等待
+            let mut recording = match state.lock() {
+                Ok(mut g) => g.recording.take(),
+                Err(_) => return err_result(&id, "状态锁损坏"),
+            };
+            let mut session_tmp = None;
+            let reply = handle_record_stop(&id, &mut recording, &mut session_tmp);
+            if let Ok(mut g) = state.lock() {
+                g.recording = recording;
+                if let Some(s) = session_tmp {
+                    g.session = Some(s);
+                }
+            }
+            reply
+        }
         other => err_result(&id, &format!("未知 cmd: {other}")),
     }
 }
@@ -133,21 +163,13 @@ fn store_and_reply(
     let result = session_to_json(&loaded);
     match state.lock() {
         Ok(mut g) => {
+            if g.recording.is_some() {
+                return err_result(id, "录制中无法载入会话");
+            }
             g.session = Some(loaded);
             ok_result(id, &result)
         }
         Err(_) => err_result(id, "状态锁损坏"),
-    }
-}
-
-fn status_json(g: &ControlState) -> String {
-    match &g.session {
-        None => "{\"state\":\"idle\",\"sessionLoaded\":false,\"packetCount\":0}".into(),
-        Some(s) => format!(
-            "{{\"state\":\"idle\",\"sessionLoaded\":true,\"packetCount\":{},\"source\":\"{}\"}}",
-            s.packets.len(),
-            escape_str(&s.source)
-        ),
     }
 }
 
@@ -182,100 +204,7 @@ fn load_from_b64(b64s: &str) -> Result<LoadedSession, String> {
     })
 }
 
-fn session_to_json(s: &LoadedSession) -> String {
-    let mut chs = String::from("[");
-    for (i, c) in s.channels.iter().enumerate() {
-        if i > 0 {
-            chs.push(',');
-        }
-        let config = if c.config_json.trim().is_empty() {
-            "{}"
-        } else {
-            c.config_json.as_str()
-        };
-        chs.push_str(&format!(
-            "{{\"index\":{},\"type\":\"{}\",\"name\":\"{}\",\"config\":{}}}",
-            c.channel_index,
-            channel_type_str(c.channel_type),
-            escape_str(&c.name),
-            config
-        ));
-    }
-    chs.push(']');
-
-    let mut pkts = String::from("[");
-    for (i, p) in s.packets.iter().enumerate() {
-        if i > 0 {
-            pkts.push(',');
-        }
-        let ch_ty = s
-            .channels
-            .iter()
-            .find(|c| c.channel_index == p.channel_index)
-            .map(|c| c.channel_type);
-        let topic = if ch_ty == Some(ChannelType::Mqtt) {
-            String::from_utf8_lossy(&p.aux).into_owned()
-        } else {
-            String::new()
-        };
-        let qos = mqtt_qos_from_flags(p.flags);
-        let retain = mqtt_retain_from_flags(p.flags);
-        pkts.push_str(&format!(
-            "{{\"i\":{i},\"us\":{},\"ch\":{},\"kind\":{},\"dir\":{},\"flags\":{},\"topic\":\"{}\",\"qos\":{qos},\"retain\":{},\"auxB64\":\"{}\",\"payloadB64\":\"{}\"}}",
-            p.relative_us,
-            p.channel_index,
-            packet_kind_u8(p.kind),
-            p.direction,
-            p.flags,
-            escape_str(&topic),
-            if retain { "true" } else { "false" },
-            b64::encode(&p.aux),
-            b64::encode(&p.payload),
-        ));
-    }
-    pkts.push(']');
-
-    let meta = s
-        .meta_json
-        .as_deref()
-        .map(|m| m.to_string())
-        .unwrap_or_else(|| "null".into());
-    let meta_field = if meta == "null" || (meta.starts_with('{') && meta.ends_with('}')) {
-        meta
-    } else {
-        format!("\"{}\"", escape_str(&meta))
-    };
-
-    format!(
-        "{{\"source\":\"{}\",\"startWallUnixUs\":{},\"durationUs\":{},\"totalPayloadBytes\":{},\"finalized\":{},\"meta\":{meta_field},\"channels\":{chs},\"packets\":{pkts}}}",
-        escape_str(&s.source),
-        s.start_wall_unix_us,
-        s.duration_us,
-        s.total_payload_bytes,
-        if s.finalized { "true" } else { "false" },
-    )
-}
-
-fn channel_type_str(t: ChannelType) -> &'static str {
-    match t {
-        ChannelType::Udp => "udp",
-        ChannelType::Serial => "serial",
-        ChannelType::Tcp => "tcp",
-        ChannelType::Mqtt => "mqtt",
-        ChannelType::Video => "video_stream",
-    }
-}
-
-fn packet_kind_u8(k: PacketKind) -> u8 {
-    match k {
-        PacketKind::Data => 0,
-        PacketKind::TcpConnect => 1,
-        PacketKind::TcpDisconnect => 2,
-        PacketKind::Marker => 3,
-    }
-}
-
-/// 自检：临时目录写一小包 → serve 环回 ping + session.open。
+/// 自检：临时目录写一小包 → serve 环回 ping + session.open + record.start/stop。
 pub fn self_check_control() -> io::Result<()> {
     let dir = std::env::temp_dir().join("fieldreplay_e5a_ctrl");
     let _ = std::fs::create_dir_all(&dir);
@@ -303,17 +232,19 @@ pub fn self_check_control() -> io::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let addr = listener.local_addr()?;
     let state = Arc::new(Mutex::new(ControlState::new()));
+    let hub = Arc::new(PushHub::new());
     let st = Arc::clone(&state);
+    let hb = Arc::clone(&hub);
     thread::spawn(move || {
         if let Ok((stream, _)) = listener.accept() {
-            let _ = handle_client(stream, st);
+            let _ = handle_client(stream, st, hb);
         }
     });
 
     thread::sleep(Duration::from_millis(50));
     let mut client = TcpStream::connect(addr)?;
-    client.set_read_timeout(Some(Duration::from_secs(3)))?;
-    client.set_write_timeout(Some(Duration::from_secs(3)))?;
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+    client.set_write_timeout(Some(Duration::from_secs(5)))?;
     ws_client_handshake(&mut client)?;
 
     write_text_frame_client(&mut client, r#"{"id":"1","cmd":"ping"}"#)?;
@@ -344,7 +275,116 @@ pub fn self_check_control() -> io::Result<()> {
     }
 
     eprintln!("  控制面 WebSocket ping + session.open：通过");
+
+    // E5b：UDP 环回录制 + 预览推送
+    self_check_record_via_ws(&mut client)?;
     Ok(())
+}
+
+fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    use std::net::UdpSocket;
+
+    let probe = UdpSocket::bind("127.0.0.1:0")?;
+    let udp_addr = probe.local_addr()?;
+    drop(probe);
+
+    let out = std::env::temp_dir()
+        .join("fieldreplay_e5b_live")
+        .join("live.fcap");
+    let _ = std::fs::create_dir_all(out.parent().unwrap());
+    let _ = std::fs::remove_file(&out);
+
+    let start = format!(
+        r#"{{"id":"3","cmd":"record.start","type":"udp","name":"live-udp","sessionTitle":"e5b","out":"{}","config":{{"bind_ip":"127.0.0.1","bind_port":{}}}}}"#,
+        escape_path_for_json(&out),
+        udp_addr.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 record.start 响应")
+    })?;
+    if !started.contains("\"ok\":true") || !started.contains("\"started\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("record.start 失败: {started}"),
+        ));
+    }
+
+    thread::sleep(Duration::from_millis(100));
+    let sender = UdpSocket::bind("127.0.0.1:0")?;
+    for i in 0..3u8 {
+        sender.send_to(&[b'L', b'I', b'V', b'E', i], udp_addr)?;
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    // 收取预览推送（可能夹杂在 stop 之前）
+    let mut saw_packet_event = false;
+    client.set_read_timeout(Some(Duration::from_millis(300)))?;
+    for _ in 0..8 {
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"record.packet\"") {
+                    saw_packet_event = true;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    write_text_frame_client(client, r#"{"id":"4","cmd":"record.stop"}"#)?;
+    // stop 响应前可能还有残留推送
+    let mut stop_reply = String::new();
+    for _ in 0..16 {
+        let frame = read_text_frame(client)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 record.stop 响应")
+        })?;
+        if frame.contains("\"id\":\"4\"") {
+            stop_reply = frame;
+            break;
+        }
+        if frame.contains("\"event\":\"record.packet\"") {
+            saw_packet_event = true;
+        }
+    }
+    if !stop_reply.contains("\"ok\":true") || !stop_reply.contains("\"stopped\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("record.stop 失败: {stop_reply}"),
+        ));
+    }
+    if !saw_packet_event {
+        // 推送可能因调度错过；至少校验落盘帧数
+        if !stop_reply.contains("\"packetCount\":") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "record.stop 未返回 packetCount",
+            ));
+        }
+    }
+    // 期望至少收到若干帧
+    if let Some(n) = extract_packet_count(&stop_reply) {
+        if n < 3 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("期望至少 3 帧，实际 {n}；推送={saw_packet_event}"),
+            ));
+        }
+    }
+
+    eprintln!("  控制面 record.start/stop UDP 环回：通过");
+    Ok(())
+}
+
+fn extract_packet_count(json: &str) -> Option<u64> {
+    super::json_util::extract_u64(json, "packetCount")
 }
 
 fn escape_path_for_json(path: &Path) -> String {

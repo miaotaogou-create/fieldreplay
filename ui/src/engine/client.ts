@@ -6,6 +6,10 @@
 import { bytesToBase64 } from './bytes';
 import {
   EngineConnState,
+  EnginePacketDto,
+  EnginePushEvent,
+  EngineRecordStartResult,
+  EngineRecordStopResult,
   EngineRpcErr,
   EngineRpcOk,
   EngineSessionDto,
@@ -29,6 +33,8 @@ export class EngineClient {
   state: EngineConnState = 'disconnected';
   lastError: string | null = null;
   onStateChange: ((s: EngineConnState) => void) | null = null;
+  /** 引擎主动推送（无 id），如 record.packet */
+  onEvent: ((ev: EnginePushEvent) => void) | null = null;
 
   constructor(url = DEFAULT_URL) {
     this.url = url;
@@ -95,18 +101,30 @@ export class EngineClient {
   }
 
   private onMessage(raw: string) {
-    let msg: EngineRpcOk<unknown> | EngineRpcErr;
+    let msg: (EngineRpcOk<unknown> | EngineRpcErr | EnginePushEvent) & {
+      id?: string;
+      event?: string;
+    };
     try {
       msg = JSON.parse(raw);
     } catch {
       return;
     }
+
+    // 无 id 的推送事件
+    if (msg.event && !msg.id) {
+      this.onEvent?.(msg as EnginePushEvent);
+      return;
+    }
+
     const id = msg.id;
+    if (!id) return;
     const p = this.pending.get(id);
     if (!p) return;
     this.pending.delete(id);
-    if (msg.ok) p.resolve(msg.result);
-    else p.reject(new Error(msg.error || '引擎返回错误'));
+    const rpc = msg as EngineRpcOk<unknown> | EngineRpcErr;
+    if (rpc.ok) p.resolve(rpc.result);
+    else p.reject(new Error(rpc.error || '引擎返回错误'));
   }
 
   private failAllPending(reason: string) {
@@ -138,6 +156,20 @@ export class EngineClient {
   clearSession(): Promise<void> {
     return this.request('session.clear', {}).then(() => undefined);
   }
+
+  startRecord(args: {
+    type: string;
+    name?: string;
+    out?: string;
+    sessionTitle?: string;
+    config: Record<string, unknown>;
+  }): Promise<EngineRecordStartResult> {
+    return this.request<EngineRecordStartResult>('record.start', args);
+  }
+
+  stopRecord(): Promise<EngineRecordStopResult> {
+    return this.request<EngineRecordStopResult>('record.stop', {});
+  }
 }
 
 export function defaultEngineUrl(): string {
@@ -145,3 +177,5 @@ export function defaultEngineUrl(): string {
     ?.VITE_ENGINE_WS;
   return fromEnv || DEFAULT_URL;
 }
+
+export type { EnginePacketDto };
