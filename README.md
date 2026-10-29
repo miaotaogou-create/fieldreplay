@@ -6,7 +6,7 @@
 - **实验室**：按时间轴将录制包灌回真实上位机  
 - **交付**：Windows 单入口客户端（双击 EXE 出窗口，不靠系统浏览器）
 
-当前：界面可开发预览；引擎与 `.fcap` 读写、单 EXE 打包按进度本阶段 E 推进。
+当前：界面可开发预览；引擎 **E1**（UDP 录放 + `.fcap`）已可用 CLI；串口/TCP/MQTT 与单 EXE 打包按进度本推进。
 
 ## 开发期预览界面（非交付形态）
 
@@ -17,6 +17,18 @@ npm run dev
 ```
 
 浏览器打开终端提示的本地地址（默认 `http://localhost:3000`）。正式交付为内嵌 UI 的桌面客户端，见 `PROGRESS.md` 决策与 E6。
+
+## 引擎（E1）
+
+```bat
+cd engine
+cargo test
+cargo run -- self-check
+cargo run --release -- record --bind 0.0.0.0:9000 --out session.fcap
+cargo run --release -- replay --in session.fcap --target 127.0.0.1:9001
+```
+
+说明见 [`engine/README.md`](engine/README.md)。
 
 ## 文档
 

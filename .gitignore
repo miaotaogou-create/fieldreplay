@@ -17,10 +17,15 @@ Thumbs.db
 .vscode/
 *.user
 
-# 引擎本地构建产物（后续）
+# 引擎本地构建产物
 engine/build/
 engine/out/
+engine/target/
 *.obj
 *.pdb
 *.exe
 !ui/public/**
+
+# 本地试录会话包
+*.fcap
+!docs/**/*.fcap

@@ -1,0 +1,19 @@
+[package]
+name = "fieldreplay-engine"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "FieldReplay 原生录放引擎：UDP 录制 / .fcap 写读 / 按时间轴重放"
+readme = "README.md"
+
+[lib]
+name = "fieldreplay_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fieldreplay-engine"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1

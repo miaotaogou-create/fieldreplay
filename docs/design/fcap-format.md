@@ -243,10 +243,11 @@
 - 写 1 路 UDP 两帧 → 读回 `relative_us` 与 payload 一致；或  
 - 单元测试：编码/解码一帧 `PacketRecord` 往返。
 
-（属 E1，本文只定契约。）
+**E1 已落地**：`engine` 中 `cargo test`（往返）与 `cargo run -- self-check`（往返 + UDP 环回录放）。
 
 ## 修订记录
 
 | 日期 | 说明 |
 |------|------|
 | 2026-10-29 | v1 初稿定稿（E0） |
+| 2026-10-29 | E1 读写实现于 `engine/`（Rust） |

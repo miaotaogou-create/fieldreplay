@@ -13,14 +13,16 @@
 |----|------|
 | 产品边界与 MVP 通道 | 已确认（见需求文档） |
 | 架构选型 | 已确认：原生录放引擎 + 现有 React UI 壳 + 打包为单入口应用 |
+| 引擎语言 | **Rust**（仅 std）；见决策 14 |
 | 仓库骨架 / docs / 进度本 | 已就绪 |
 | **`ui/` 界面** | U8 通过后已做小抛光（故障标记 + 去掉协议解包 UI）；仍为 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
-| `engine/` 原生引擎 | **下一步**：E1（UDP 录→写盘→按时间轴重放） |
+| `engine/` 原生引擎 | **E1 已完成**：UDP 录 → `.fcap` → 按时间轴重放（CLI + self-check） |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
-| 二进制 `.fcap` 读写 | 未开始（随 E1） |
+| 二进制 `.fcap` 读写 | **已落地**（`engine` 的 `SessionWriter` / `SessionReader`） |
 | 打包单入口 | 未开始（E6）；普通客户端窗口，见决策 11/13 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
+| **下一步** | **E2** 串口录放 |
 
 ## 已确认决策
 
@@ -37,6 +39,7 @@
 11. **交付形态**：最终是双击主程序进入录/放界面；`npm run dev` / 浏览器仅开发期。壳内嵌 UI（WebView / Tauri 等，E6 定），**不以「先开浏览器再连本地服务」为正式用法**。
 12. **帧数据检查页**：保留为通用原始帧浏览器（筛选、HEX/ASCII、通道/Topic/时间戳）；**不做**业务协议智能解包。解包仅可后置可选插件。
 13. **最终用户体验（再强调）**：交付物就是普通桌面客户端——**单入口 EXE，双击运行出本机窗口**；界面不通过系统浏览器查看。Vite/`localhost` 只给开发用。
+14. **引擎语言**：Rust（`engine/`，E1 仅标准库）；后续壳可走 Tauri 等同生态，E6 再定。
 
 ## 仓库布局
 
@@ -102,8 +105,8 @@ fieldreplay/
 | ID | 任务 | 状态 | 完成记录 |
 |----|------|------|----------|
 | E0 | 定稿 `.fcap` v1 文档（`docs/design/fcap-format.md`） | [x] | 2026-10-29：小端；64B 头 + 通道表 + 可选 JSON meta + 变长帧；TCP 事件/MQTT topic 进 aux；业务协议不入库 |
-| E1 | 引擎最小闭环：UDP 录 → 写盘 → 按时间轴重放 | [ ] ← **当前下一步** | |
-| E2 | 串口录放 | [ ] | |
+| E1 | 引擎最小闭环：UDP 录 → 写盘 → 按时间轴重放 | [x] | 2026-10-29：Rust 引擎；`record`/`replay`/`self-check`；单元往返 + UDP 环回通过 |
+| E2 | 串口录放 | [ ] ← **当前下一步** | |
 | E3 | TCP 角色可配录放 | [ ] | |
 | E4 | MQTT 订阅录 / 发布放 | [ ] | |
 | E5 | UI 去 mock，接本地 IPC/WebSocket | [ ] | |
@@ -112,12 +115,12 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E1**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E2**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U 阶段已收口；`.fcap` 契约见 `docs/design/fcap-format.md`
+3. 界面 U 阶段已收口；`.fcap` 契约见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **开发预览**（非交付）：`cd ui && npm run dev`；交付目标见决策 13（单 EXE 客户端窗口）
-6. E1 开工前读 `fcap-format.md` + `architecture.md`；引擎语言若未定，先在本步选最小可落地栈并记入决策
+6. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
 
 ## 决策记录（追加）
 
@@ -132,3 +135,4 @@ fieldreplay/
 | 2026-10-29 | 正式交付为单入口应用，不以浏览器为最终用法 | 架构已写；用户再确认；开发期可用 Vite 预览 |
 | 2026-10-29 | 定稿 `.fcap` v1（E0） | 引擎读写契约；解 G2；对接说明示意与文档对齐 |
 | 2026-10-29 | 再强调：单 EXE 双击 = 普通客户端窗口，不经系统浏览器 | 用户新会话明确最终目标 |
+| 2026-10-29 | **引擎语言选 Rust**（仅标准库做 E1；无 Tokio/额外 crate） | 本机已有 cargo；热路径原生；利于后续 Tauri/单入口；Winsock 经 std::net 足够 UDP |
