@@ -1,4 +1,4 @@
-//! 按 `relative_us` 将数据帧发往目标（UDP / 串口 / TCP）。
+//! 按 `relative_us` 将数据帧发往目标（UDP / 串口 / TCP / MQTT）。
 
 use std::io;
 use std::net::SocketAddr;
@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 use crate::clock::SessionClock;
 use crate::fcap::{ChannelType, PacketKind, SessionReader};
+use crate::mqtt::{
+    apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, MqttClient, MqttConfig,
+};
 use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{accept_until, connect, listen, write_all, TcpConfig, TcpRole};
 use crate::udp::{bind_sender, send_to};
@@ -241,5 +244,80 @@ pub fn replay_tcp_from_file(
     }
 
     eprintln!("重放结束：发送 {sent} 帧");
+    Ok(sent)
+}
+
+pub struct MqttReplayOptions {
+    pub in_path: std::path::PathBuf,
+    /// 重放侧 Broker；若文件内有 mqtt 配置，host/port 可被本项覆盖。
+    pub broker: SocketAddr,
+    /// 拼到录制 topic 前（可空）。
+    pub topic_prefix: String,
+    /// 发布 QoS：`None` = 用帧 flags 里录到的值。
+    pub qos_override: Option<u8>,
+    pub poll_timeout: Duration,
+}
+
+/// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
+pub fn replay_mqtt_from_file(opts: &MqttReplayOptions) -> io::Result<u64> {
+    let mut reader = SessionReader::open(&opts.in_path)?;
+    if !reader.header().is_finalized() {
+        eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
+    }
+
+    let recorded = reader
+        .channels()
+        .iter()
+        .find(|c| c.channel_type == ChannelType::Mqtt)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "会话中无 MQTT 通道")
+        })?;
+    let recorded_cfg = MqttConfig::from_config_json(&recorded.config_json)?;
+
+    let config = MqttConfig::new(
+        opts.broker.ip().to_string(),
+        opts.broker.port(),
+        recorded_cfg.topic.clone(),
+        recorded_cfg.qos,
+    );
+
+    eprintln!(
+        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us）",
+        opts.in_path.display(),
+        config.broker,
+        config.port,
+        opts.topic_prefix
+    );
+
+    let mut client = MqttClient::connect(&config, opts.poll_timeout)?;
+    let base = Instant::now();
+    let mut sent = 0u64;
+
+    reader.rewind_packets()?;
+    while let Some(pkt) = reader.next_packet()? {
+        if pkt.kind != PacketKind::Data {
+            continue;
+        }
+        let ch = reader
+            .channels()
+            .iter()
+            .find(|c| c.channel_index == pkt.channel_index);
+        if ch.map(|c| c.channel_type) != Some(ChannelType::Mqtt) {
+            continue;
+        }
+        let topic = String::from_utf8_lossy(&pkt.aux);
+        let topic = apply_topic_prefix(&opts.topic_prefix, &topic);
+        let qos = opts
+            .qos_override
+            .unwrap_or_else(|| mqtt_qos_from_flags(pkt.flags));
+        let retain = mqtt_retain_from_flags(pkt.flags);
+
+        SessionClock::sleep_until_relative(base, pkt.relative_us);
+        client.publish(&topic, &pkt.payload, qos, retain)?;
+        sent += 1;
+    }
+
+    let _ = client.disconnect();
+    eprintln!("重放结束：发布 {sent} 帧");
     Ok(sent)
 }

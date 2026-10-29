@@ -17,12 +17,12 @@
 | 仓库骨架 / docs / 进度本 | 已就绪 |
 | **`ui/` 界面** | U8 通过后已做小抛光（故障标记 + 去掉协议解包 UI）；仍为 mock；`npm run dev` 仅开发预览 |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
-| `engine/` 原生引擎 | **E3 已完成**：UDP + 串口 + TCP 角色可配录 → `.fcap` → 按时间轴重放（CLI + self-check） |
+| `engine/` 原生引擎 | **E4 已完成**：UDP + 串口 + TCP + MQTT 订阅录/发布放 → `.fcap`（CLI + self-check） |
 | 二进制 `.fcap` 规范 | **E0 已定稿**：`docs/design/fcap-format.md` |
 | 二进制 `.fcap` 读写 | **已落地**（`engine` 的 `SessionWriter` / `SessionReader`） |
 | 打包单入口 | 未开始（E6）；普通客户端窗口，见决策 11/13 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E4** MQTT 订阅录 / 发布放 |
+| **下一步** | **E5** UI 去 mock，接本地 IPC/WebSocket |
 
 ## 已确认决策
 
@@ -51,7 +51,7 @@ fieldreplay/
   docs/requirements/       ← 需求与验收
   docs/design/             ← 架构与格式
   ui/                      ← React 界面（当前主线）
-  engine/                  ← 原生录放引擎（E2：UDP+串口）
+  engine/                  ← 原生录放引擎（E4：UDP+串口+TCP+MQTT）
   tests/
 ```
 
@@ -108,16 +108,16 @@ fieldreplay/
 | E1 | 引擎最小闭环：UDP 录 → 写盘 → 按时间轴重放 | [x] | 2026-10-29：Rust 引擎；`record`/`replay`/`self-check`；单元往返 + UDP 环回通过 |
 | E2 | 串口录放 | [x] | 2026-10-29：`serial` Win32 实口 + 内存环回；`record`/`replay --port`；self-check 串口环回通过 |
 | E3 | TCP 角色可配录放 | [x] | 2026-10-29：`tcp` std；server/client 录连接事件+RX；重放角色取反；CLI `--tcp-role`/`--tcp`；self-check 双向环回通过 |
-| E4 | MQTT 订阅录 / 发布放 | [ ] ← **当前下一步** | |
-| E5 | UI 去 mock，接本地 IPC/WebSocket | [ ] | |
+| E4 | MQTT 订阅录 / 发布放 | [x] | 2026-10-29：`mqtt` 最小 3.1.1（std）；订阅录/发布放；CLI `--mqtt`/`--topic`/`--topic-prefix`；迷你 Broker 环回 self-check 通过；无账号/TLS |
+| E5 | UI 去 mock，接本地 IPC/WebSocket | [ ] ← **当前下一步** | |
 | E6 | Windows 单入口打包（普通客户端窗口，非浏览器） | [ ] | |
 | E7 | （后置）视频通道 | [ ] | |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E4**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E5**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U 阶段已收口；`.fcap` 契约见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）
+3. 界面 U 阶段已收口；引擎 E4（含 MQTT）已收口；`.fcap` 契约见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **开发预览**（非交付）：`cd ui && npm run dev`；交付目标见决策 13（单 EXE 客户端窗口）
 6. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
@@ -138,3 +138,4 @@ fieldreplay/
 | 2026-10-29 | **引擎语言选 Rust**（仅标准库做 E1；无 Tokio/额外 crate） | 本机已有 cargo；热路径原生；利于后续 Tauri/单入口；Winsock 经 std::net 足够 UDP |
 | 2026-10-29 | E2 串口仍仅标准库：Windows 手写 Win32 FFI；自检用内存环回 | 不引入 serialport 等 crate；无虚口时仍可验录放路径；实口手测靠 COM/虚拟对 |
 | 2026-10-29 | E3 TCP 仍仅标准库：`TcpListener`/`TcpStream`；重放角色相对录制 config 取反 | 与架构/格式文档一致；自检覆盖 server 录→client 放与 client 录→server 放 |
+| 2026-10-29 | E4 MQTT 仍仅标准库：手写最小 3.1.1；自检嵌迷你 Broker；账号/TLS 后置 | 与决策「先原始字节」一致；待确认项不阻塞录放闭环 |

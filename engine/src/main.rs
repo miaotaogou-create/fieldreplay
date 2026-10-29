@@ -11,10 +11,11 @@ use fieldreplay_engine::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter,
 };
 use fieldreplay_engine::{
-    record_serial_with_port, record_tcp_to_file, record_udp_to_file, replay_serial_with_port,
-    replay_tcp_from_file, replay_udp_from_file, Parity, RecordOptions, ReplayOptions, SerialConfig,
-    SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions,
-    TcpReplayOptions, TcpRole,
+    record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
+    replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file,
+    MiniBroker, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, RecordOptions,
+    ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig,
+    TcpRecordOptions, TcpReplayOptions, TcpRole,
 };
 
 fn main() {
@@ -46,7 +47,7 @@ fn run() -> io::Result<()> {
 fn print_help() {
     eprintln!(
         "\
-FieldReplay 引擎（E3：UDP + 串口 + TCP 录 → .fcap → 按时间轴重放）
+FieldReplay 引擎（E4：UDP + 串口 + TCP + MQTT 录 → .fcap → 按时间轴重放）
 
 用法:
   fieldreplay-engine record  --bind <ip:port> --out <file.fcap> [--duration <秒>]
@@ -54,14 +55,18 @@ FieldReplay 引擎（E3：UDP + 串口 + TCP 录 → .fcap → 按时间轴重�
                              [--data-bits 8] [--stop-bits 1] --out <file.fcap> [--duration <秒>]
   fieldreplay-engine record  --tcp-role <server|client> --tcp <ip:port> --out <file.fcap> \\
                              [--duration <秒>]
+  fieldreplay-engine record  --mqtt <host:port> --topic <filter> [--qos 0|1|2] \\
+                             --out <file.fcap> [--duration <秒>]
   fieldreplay-engine replay  --in <file.fcap> --target <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
+  fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>]
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
---bind / --port / --tcp 互斥；replay 的 --target / --port / --tcp 互斥。
+--bind / --port / --tcp / --mqtt 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
+MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
 "
     );
 }
@@ -71,6 +76,9 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut port_name: Option<String> = None;
     let mut tcp_endpoint: Option<SocketAddr> = None;
     let mut tcp_role: Option<TcpRole> = None;
+    let mut mqtt_endpoint: Option<SocketAddr> = None;
+    let mut mqtt_topic: Option<String> = None;
+    let mut mqtt_qos: u8 = 0;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
     let mut stop_bits: u8 = 1;
@@ -107,6 +115,26 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 tcp_role = Some(
                     TcpRole::parse(&v).ok_or_else(|| err_arg("tcp-role 须为 server|client"))?,
                 );
+            }
+            "--mqtt" => {
+                let v = args.next().ok_or_else(|| err_arg("--mqtt 需要 host:port"))?;
+                mqtt_endpoint = Some(v.parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("mqtt: {e}"))
+                })?);
+            }
+            "--topic" => {
+                mqtt_topic = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--topic 需要主题过滤器"))?,
+                );
+            }
+            "--qos" => {
+                let v = args.next().ok_or_else(|| err_arg("--qos 需要 0|1|2"))?;
+                mqtt_qos = v
+                    .parse::<u8>()
+                    .ok()
+                    .filter(|q| *q <= 2)
+                    .ok_or_else(|| err_arg("--qos 须为 0|1|2"))?;
             }
             "--baud" => {
                 let v = args.next().ok_or_else(|| err_arg("--baud 需要数值"))?;
@@ -158,12 +186,13 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         bind.is_some(),
         port_name.is_some(),
         tcp_endpoint.is_some() || tcp_role.is_some(),
+        mqtt_endpoint.is_some() || mqtt_topic.is_some(),
     ]
     .iter()
     .filter(|&&x| x)
     .count();
     if modes > 1 {
-        return Err(err_arg("--bind / --port / --tcp 不能同时使用"));
+        return Err(err_arg("--bind / --port / --tcp / --mqtt 不能同时使用"));
     }
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -210,7 +239,31 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         return Err(err_arg("TCP 录制需要 --tcp <ip:port>"));
     }
 
-    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind、--port 或 --tcp"))?;
+    if let Some(endpoint) = mqtt_endpoint {
+        let topic = mqtt_topic.ok_or_else(|| err_arg("MQTT 录制需要 --topic"))?;
+        let config = MqttConfig::new(
+            endpoint.ip().to_string(),
+            endpoint.port(),
+            topic.clone(),
+            mqtt_qos,
+        );
+        let opts = MqttRecordOptions {
+            config,
+            out_path: out,
+            channel_name: format!("MQTT-{topic}"),
+            session_title: Some(format!("record-mqtt-{}", endpoint.port())),
+            max_duration: duration,
+            poll_timeout: Duration::from_millis(200),
+        };
+        let n = record_mqtt_to_file(&opts, &stop)?;
+        println!("ok packets={n}");
+        return Ok(());
+    }
+    if mqtt_topic.is_some() {
+        return Err(err_arg("MQTT 录制需要 --mqtt <host:port>"));
+    }
+
+    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind、--port、--tcp 或 --mqtt"))?;
     let config = SerialConfig {
         port_name: port_name.clone(),
         baud,
@@ -235,6 +288,8 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut input: Option<PathBuf> = None;
     let mut target: Option<SocketAddr> = None;
     let mut tcp_endpoint: Option<SocketAddr> = None;
+    let mut mqtt_endpoint: Option<SocketAddr> = None;
+    let mut topic_prefix = String::new();
     let mut port_name: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -262,6 +317,17 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 tcp_endpoint = Some(v.parse().map_err(|e| {
                     io::Error::new(io::ErrorKind::InvalidInput, format!("tcp: {e}"))
                 })?);
+            }
+            "--mqtt" => {
+                let v = args.next().ok_or_else(|| err_arg("--mqtt 需要 host:port"))?;
+                mqtt_endpoint = Some(v.parse().map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidInput, format!("mqtt: {e}"))
+                })?);
+            }
+            "--topic-prefix" => {
+                topic_prefix = args
+                    .next()
+                    .ok_or_else(|| err_arg("--topic-prefix 需要前缀"))?;
             }
             "--port" => {
                 port_name = Some(
@@ -302,12 +368,17 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     }
 
     let input = input.ok_or_else(|| err_arg("缺少 --in"))?;
-    let modes = [target.is_some(), port_name.is_some(), tcp_endpoint.is_some()]
-        .iter()
-        .filter(|&&x| x)
-        .count();
+    let modes = [
+        target.is_some(),
+        port_name.is_some(),
+        tcp_endpoint.is_some(),
+        mqtt_endpoint.is_some(),
+    ]
+    .iter()
+    .filter(|&&x| x)
+    .count();
     if modes > 1 {
-        return Err(err_arg("--target / --port / --tcp 不能同时使用"));
+        return Err(err_arg("--target / --port / --tcp / --mqtt 不能同时使用"));
     }
 
     if let Some(target) = target {
@@ -333,7 +404,20 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         return Ok(());
     }
 
-    let port_name = port_name.ok_or_else(|| err_arg("缺少 --target、--port 或 --tcp"))?;
+    if let Some(endpoint) = mqtt_endpoint {
+        let opts = MqttReplayOptions {
+            in_path: input,
+            broker: endpoint,
+            topic_prefix,
+            qos_override: None,
+            poll_timeout: Duration::from_millis(200),
+        };
+        let n = replay_mqtt_from_file(&opts)?;
+        println!("ok sent={n}");
+        return Ok(());
+    }
+
+    let port_name = port_name.ok_or_else(|| err_arg("缺少 --target、--port、--tcp 或 --mqtt"))?;
     let config = SerialConfig {
         port_name,
         baud,
@@ -350,7 +434,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     Ok(())
 }
 
-/// 写 UDP/串口/TCP 帧往返校验；本机环回录放。
+/// 写 UDP/串口/TCP/MQTT 帧往返校验；本机环回录放。
 fn cmd_self_check() -> io::Result<()> {
     print!("self-check: fcap 往返… ");
     let _ = io::stdout().flush();
@@ -379,6 +463,12 @@ fn cmd_self_check() -> io::Result<()> {
             channel_type: ChannelType::Tcp,
             name: "TCP-self".into(),
             config_json: TcpConfig::new(TcpRole::Server, "127.0.0.1", 9000).to_config_json(),
+        },
+        ChannelEntry {
+            channel_index: 3,
+            channel_type: ChannelType::Mqtt,
+            name: "MQTT-self".into(),
+            config_json: MqttConfig::new("127.0.0.1", 1883, "factory/#", 0).to_config_json(),
         },
     ];
     let mut w = SessionWriter::create(&path, 1_700_000_000_000_000, &channels, None)?;
@@ -418,13 +508,23 @@ fn cmd_self_check() -> io::Result<()> {
         aux: Vec::new(),
         payload: b"tcp-gamma".to_vec(),
     })?;
+    w.append_packet(&PacketRecord {
+        relative_us: 4000,
+        channel_index: 3,
+        kind: PacketKind::Data,
+        direction: 0,
+        flags: fieldreplay_engine::pack_mqtt_flags(1, false),
+        aux: b"factory/line3/servo".to_vec(),
+        payload: b"mqtt-delta".to_vec(),
+    })?;
     w.finalize()?;
 
     let mut r = SessionReader::open(&path)?;
     let pkts = r.read_all_packets()?;
-    assert_eq!(pkts.len(), 4, "帧数");
-    assert_eq!(r.channels()[2].channel_type, ChannelType::Tcp);
-    assert_eq!(pkts[3].payload, b"tcp-gamma");
+    assert_eq!(pkts.len(), 5, "帧数");
+    assert_eq!(r.channels()[3].channel_type, ChannelType::Mqtt);
+    assert_eq!(pkts[4].payload, b"mqtt-delta");
+    assert_eq!(pkts[4].aux, b"factory/line3/servo");
     println!("ok");
 
     print!("self-check: UDP 录放环回… ");
@@ -445,6 +545,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: TCP client 录 / server 放… ");
     let _ = io::stdout().flush();
     tcp_client_record_loopback()?;
+    println!("ok");
+
+    print!("self-check: MQTT 订阅录 / 发布放… ");
+    let _ = io::stdout().flush();
+    mqtt_loopback_check()?;
     println!("ok");
 
     let _ = std::fs::remove_file(&path);
@@ -839,6 +944,112 @@ fn tcp_client_record_loopback() -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("TCP client→server 重放失败: sent={sent} got={got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// 迷你 Broker：订阅录两包 → .fcap → 发布重放，旁路订阅核验。
+fn mqtt_loopback_check() -> io::Result<()> {
+    use std::thread;
+
+    let broker = MiniBroker::start()?;
+    let addr = broker.addr();
+    thread::sleep(Duration::from_millis(40));
+
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_mqtt_loop_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+
+    let recorder = thread::spawn(move || {
+        let opts = MqttRecordOptions {
+            config: MqttConfig::new(addr.ip().to_string(), addr.port(), "factory/#", 0),
+            out_path: fcap2,
+            channel_name: "MQTT-loop".into(),
+            session_title: Some("mqtt-loop".into()),
+            max_duration: Some(Duration::from_secs(3)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        record_mqtt_to_file(&opts, &stop_rec)
+    });
+
+    thread::sleep(Duration::from_millis(150));
+    {
+        let cfg = MqttConfig::new(addr.ip().to_string(), addr.port(), "unused", 0);
+        let mut pub_client = MqttClient::connect(&cfg, Duration::from_millis(100))?;
+        pub_client.publish("factory/line3/servo", b"ping-1", 0, false)?;
+        thread::sleep(Duration::from_millis(40));
+        pub_client.publish("factory/line3/alarm", b"ping-2", 0, false)?;
+        let _ = pub_client.disconnect();
+    }
+    thread::sleep(Duration::from_millis(120));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder
+        .join()
+        .map_err(|_| err_arg("MQTT 录制线程 panic"))??;
+    if n < 2 {
+        broker.stop();
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT 录制帧数不足: {n}"),
+        ));
+    }
+
+    // 旁路订阅者收重放
+    let listen_cfg = MqttConfig::new(addr.ip().to_string(), addr.port(), "factory/#", 0);
+    let mut listener = MqttClient::connect(&listen_cfg, Duration::from_millis(100))?;
+    listener.subscribe("factory/#", 0)?;
+    thread::sleep(Duration::from_millis(80));
+
+    let listen_stop = Arc::new(AtomicBool::new(false));
+    let listen_stop2 = Arc::clone(&listen_stop);
+    let collector = thread::spawn(move || -> io::Result<Vec<(String, Vec<u8>)>> {
+        let mut out = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while out.len() < 2 && Instant::now() < deadline {
+            if let Some(msg) = listener.poll_publish(&listen_stop2)? {
+                out.push((msg.topic, msg.payload));
+            }
+        }
+        let _ = listener.disconnect();
+        Ok(out)
+    });
+
+    let sent = replay_mqtt_from_file(&MqttReplayOptions {
+        in_path: fcap.clone(),
+        broker: addr,
+        topic_prefix: String::new(),
+        qos_override: Some(0),
+        poll_timeout: Duration::from_millis(50),
+    })?;
+    listen_stop.store(true, Ordering::SeqCst);
+    let got = collector
+        .join()
+        .map_err(|_| err_arg("MQTT 接收线程 panic"))??;
+    broker.stop();
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 2 || got.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT 重放不足: sent={sent} got={}", got.len()),
+        ));
+    }
+    if got[0].1 != b"ping-1" || got[1].1 != b"ping-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT 载荷不一致: {got:?}"),
+        ));
+    }
+    if got[0].0 != "factory/line3/servo" || got[1].0 != "factory/line3/alarm" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT topic 不一致: {got:?}"),
         ));
     }
     Ok(())

@@ -1,4 +1,4 @@
-//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 串口 / TCP）。
+//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 串口 / TCP / MQTT）。
 
 use std::io;
 use std::net::SocketAddr;
@@ -11,6 +11,7 @@ use crate::clock::SessionClock;
 use crate::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionWriter,
 };
+use crate::mqtt::{pack_mqtt_flags, MqttClient, MqttConfig};
 use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{
     accept_until, connect, listen, peer_aux as tcp_peer_aux, read_some, ReadOutcome, TcpConfig,
@@ -320,6 +321,76 @@ pub fn record_tcp_to_file(opts: &TcpRecordOptions, stop: &AtomicBool) -> io::Res
         drop(stream);
     }
 
+    let count = writer.packet_count();
+    writer.finalize()?;
+    eprintln!("录制结束：{count} 帧 → {}", opts.out_path.display());
+    Ok(count)
+}
+
+pub struct MqttRecordOptions {
+    pub config: MqttConfig,
+    pub out_path: std::path::PathBuf,
+    pub channel_name: String,
+    pub session_title: Option<String>,
+    pub max_duration: Option<Duration>,
+    pub poll_timeout: Duration,
+}
+
+/// 连接 Broker 订阅，把入站 PUBLISH 落盘（topic→aux，payload→payload）。
+pub fn record_mqtt_to_file(opts: &MqttRecordOptions, stop: &AtomicBool) -> io::Result<u64> {
+    let clock = SessionClock::start();
+    let channels = [ChannelEntry {
+        channel_index: 0,
+        channel_type: ChannelType::Mqtt,
+        name: opts.channel_name.clone(),
+        config_json: opts.config.to_config_json(),
+    }];
+    let meta = opts.session_title.as_ref().map(|t| {
+        format!(r#"{{"session_title":{}}}"#, json_string(t))
+    });
+
+    let mut writer = SessionWriter::create(
+        &opts.out_path,
+        clock.start_wall_unix_us(),
+        &channels,
+        meta.as_deref(),
+    )?;
+
+    eprintln!(
+        "录制中：MQTT {}:{} topic={} qos={} → {}",
+        opts.config.broker,
+        opts.config.port,
+        opts.config.topic,
+        opts.config.qos,
+        opts.out_path.display()
+    );
+
+    let mut client = MqttClient::connect(&opts.config, opts.poll_timeout)?;
+    client.subscribe(&opts.config.topic, opts.config.qos)?;
+
+    while !stop.load(Ordering::SeqCst) {
+        if let Some(max) = opts.max_duration {
+            if clock.relative_us() >= max.as_micros() as u64 {
+                break;
+            }
+        }
+        match client.poll_publish(stop)? {
+            Some(msg) => {
+                writer.append_packet(&PacketRecord {
+                    relative_us: clock.relative_us(),
+                    channel_index: 0,
+                    kind: PacketKind::Data,
+                    direction: 0, // RX
+                    flags: pack_mqtt_flags(msg.qos, msg.retain),
+                    aux: msg.topic.into_bytes(),
+                    payload: msg.payload,
+                })?;
+            }
+            None => continue,
+        }
+    }
+
+    let _ = client.disconnect();
     let count = writer.packet_count();
     writer.finalize()?;
     eprintln!("录制结束：{count} 帧 → {}", opts.out_path.display());
