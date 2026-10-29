@@ -10,8 +10,6 @@ import {
   CaptureSessionMetadata,
 } from '../types/recorder';
 import {
-  bytesToHex,
-  bytesToAscii,
   createModbusPacket,
   createUdpLidarPacket,
   createTcpVisionPacket,
@@ -22,14 +20,8 @@ import {
   Square,
   Pause,
   Download,
-  CheckCircle2,
-  AlertCircle,
   Plus,
-  Wifi,
-  Sliders,
-  Sparkles,
   Search,
-  HardDrive,
   Activity,
   FileCheck,
 } from 'lucide-react';
@@ -143,12 +135,20 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     return () => clearInterval(packetTimer);
   }, [recordState, simulateHardwareStream, elapsedMs, channels, recordedPackets.length]);
 
-  // Auto scroll
+  // 有新报文且开启「锁定最新」时滚到底
   useEffect(() => {
     if (autoScroll && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
   }, [recordedPackets, autoScroll]);
+
+  // 用户上翻离开底部 → 切到自由浏览；回到底部可再锁
+  const handleLogScroll = () => {
+    const el = logContainerRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if (!nearBottom && autoScroll) setAutoScroll(false);
+  };
 
   const handleStartRecord = () => {
     setRecordState('recording');
@@ -213,13 +213,16 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         p.hexPreview.toLowerCase().includes(q) ||
         p.asciiPreview.toLowerCase().includes(q) ||
         p.channelName.toLowerCase().includes(q) ||
-        (p.protocolHint && p.protocolHint.toLowerCase().includes(q))
+        (p.protocolHint && p.protocolHint.toLowerCase().includes(q)) ||
+        (p.mqttTopic && p.mqttTopic.toLowerCase().includes(q))
       );
     }
     return true;
   });
+  const isFilterActive = filterChannel !== 'all' || searchQuery.trim().length > 0;
 
   const handleExportConfirm = () => {
+    if (recordedPackets.length === 0) return;
     const meta: CaptureSessionMetadata = {
       sessionTitle: `现场捕获包_${new Date().toISOString().slice(0, 10)}_${Date.now().toString().slice(-4)}.fcap`,
       recordedBy,
@@ -304,6 +307,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                     <input
                       type="checkbox"
                       checked={chan.enabled}
+                      onClick={(e) => e.stopPropagation()}
                       onChange={() => onToggleChannel(chan.id)}
                       className="rounded border-slate-300 text-sky-600 focus:ring-sky-500"
                     />
@@ -485,7 +489,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               实时数据流监视 (Raw Hex / ASCII Stream)
             </h2>
             <span className="text-xs text-slate-500 font-mono">
-              共 {recordedPackets.length} 帧
+              {isFilterActive
+                ? `显示 ${filteredPackets.length} / 共 ${recordedPackets.length} 帧`
+                : `共 ${recordedPackets.length} 帧`}
             </span>
           </div>
 
@@ -511,14 +517,20 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="搜索 Hex / 内容..."
-                className="text-xs bg-white border border-slate-200 rounded-md pl-7 pr-3 py-1 text-slate-700 w-36 focus:w-48 transition-all focus:outline-none focus:ring-1 focus:ring-sky-500"
+                placeholder="搜索 Hex / ASCII / Topic..."
+                className="text-xs bg-white border border-slate-200 rounded-md pl-7 pr-3 py-1 text-slate-700 w-40 focus:w-56 transition-all focus:outline-none focus:ring-1 focus:ring-sky-500"
               />
             </div>
 
             {/* Auto scroll toggle */}
             <button
-              onClick={() => setAutoScroll(!autoScroll)}
+              onClick={() => {
+                const next = !autoScroll;
+                setAutoScroll(next);
+                if (next && logContainerRef.current) {
+                  logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+                }
+              }}
               className={`px-2 py-1 text-xs rounded border transition-colors ${
                 autoScroll
                   ? 'bg-slate-900 text-white border-slate-900'
@@ -533,12 +545,17 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         {/* Packet Stream List */}
         <div
           ref={logContainerRef}
+          onScroll={handleLogScroll}
           className="h-80 overflow-y-auto divide-y divide-slate-100 font-mono text-xs"
         >
           {filteredPackets.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-400 space-y-2 py-12">
               <Activity className="w-8 h-8 text-slate-300 stroke-[1.5]" />
-              <p className="text-xs">暂无流入数据，请点击上方“开始现场录制”</p>
+              {recordedPackets.length === 0 ? (
+                <p className="text-xs">暂无流入数据，请点击上方“开始现场录制”</p>
+              ) : (
+                <p className="text-xs">当前筛选条件下无匹配报文，可改信道筛选或清空搜索</p>
+              )}
             </div>
           ) : (
             filteredPackets.map((pkt) => (
@@ -659,19 +676,34 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   <span>文件包体积:</span>
                   <span className="font-mono font-semibold text-slate-900">{totalMb} MB</span>
                 </div>
+                <div className="flex justify-between">
+                  <span>已启用通道:</span>
+                  <span className="font-mono font-semibold text-slate-900">
+                    {channels.filter((c) => c.enabled).length} / {channels.length}
+                  </span>
+                </div>
               </div>
+
+              {recordedPackets.length === 0 && (
+                <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  当前缓存为空，请先完成至少一次现场录制再导出，避免发给研发空包。
+                </p>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
+                type="button"
                 onClick={() => setIsExportModalOpen(false)}
                 className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-800"
               >
                 取消
               </button>
               <button
+                type="button"
                 onClick={handleExportConfirm}
-                className="px-5 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm flex items-center gap-1.5"
+                disabled={recordedPackets.length === 0}
+                className="px-5 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-sky-600"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>立即下载 .fcap 数据包</span>
@@ -703,10 +735,10 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               <label className="block font-medium text-slate-700 mb-1">接口类型</label>
               <div className="grid grid-cols-4 gap-2">
                 {([
-                  { id: 'serial' as const, label: '串口' },
-                  { id: 'udp' as const, label: 'UDP' },
-                  { id: 'tcp' as const, label: 'TCP' },
-                  { id: 'mqtt' as const, label: 'MQTT' },
+                  { id: 'serial' as const, label: '串口 / RS485' },
+                  { id: 'udp' as const, label: 'UDP 网络' },
+                  { id: 'tcp' as const, label: 'TCP 套接字' },
+                  { id: 'mqtt' as const, label: 'MQTT 订阅' },
                 ]).map((t) => (
                   <button
                     key={t.id}
@@ -717,7 +749,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                       else if (t.id === 'mqtt') setNewChanParam('127.0.0.1:1883, factory/+/telemetry');
                       else setNewChanParam('0.0.0.0:8888');
                     }}
-                    className={`py-2 px-2 rounded-lg font-medium border text-center ${
+                    className={`py-2 px-1.5 rounded-lg font-medium border text-center leading-tight ${
                       newChanType === t.id
                         ? 'bg-sky-50 text-sky-700 border-sky-300'
                         : 'bg-white text-slate-600 border-slate-200'
@@ -729,7 +761,13 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               </div>
             </div>
             <div>
-              <label className="block font-medium text-slate-700 mb-1">参数配置</label>
+              <label className="block font-medium text-slate-700 mb-1">
+                {newChanType === 'serial'
+                  ? '串口参数'
+                  : newChanType === 'mqtt'
+                  ? 'Broker 与 Topic'
+                  : '监听地址'}
+              </label>
               <input
                 type="text"
                 value={newChanParam}

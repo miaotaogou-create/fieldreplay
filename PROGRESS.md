@@ -14,7 +14,7 @@
 | 产品边界与 MVP 通道 | 已确认（见需求文档） |
 | 架构选型 | 已确认：原生录放引擎 + 现有 React UI 壳 + 打包为单入口应用 |
 | 仓库骨架 / docs / 进度本 | 已就绪 |
-| **`ui/` 界面（当前主线）** | **进行中**：U0–U2 已完成；已对齐原型 MQTT；已清 AI Studio 残留；仍为 mock |
+| **`ui/` 界面（当前主线）** | **进行中**：U0–U3 已完成；录制页导出/空态/筛选滚动已补齐；仍为 mock |
 | 视觉稿来源 | `C:\Users\49358\Downloads\fieldreplay---上位机现场数据录制与高保真重演工作台 (1)` |
 | `engine/` 原生引擎 | 未开始（**界面完成后再做**） |
 | 二进制 `.fcap` 读写 | 未开始 |
@@ -59,8 +59,8 @@ fieldreplay/
 | U0 | 同步 Downloads 原型 `(1)` 差异（MQTT 重演/报文/类型/mock）进 `ui/` | [x] | 2026-10-29 |
 | U1 | 录制页：MQTT 通道展示 + 添加 + mock 发包；通道勾选可开关 | [x] | 2026-10-29 |
 | U2 | 去掉 AI Studio 残留：卸 `@google/genai`、删无用 README 横幅/密钥说明；`ui/README.md` 改中文产品预览说明 | [x] | 2026-10-29：卸 genai/express/dotenv/motion；删 `.env.example`/`metadata.json`/未引用 aistudio 图；README 改中文预览；vite 去掉 DISABLE_HMR |
-| U3 | 录制页对照原型：导出弹窗 / 空态 / 文案 / 筛选与滚动，缺什么补什么（本步只改 `FieldRecorderView`） | [ ] | **← 当前下一步** |
-| U4 | 重演页对照原型：TCP/MQTT/UDP/串口目标区与播放条（本步只改 `DevReplayerView`） | [ ] | |
+| U3 | 录制页对照原型：导出弹窗 / 空态 / 文案 / 筛选与滚动，缺什么补什么（本步只改 `FieldRecorderView`） | [x] | 2026-10-29：勾选防双触发；筛选空态与计数；滚动离底解锁；空包导出禁用；添加通道文案对齐原型 |
+| U4 | 重演页对照原型：TCP/MQTT/UDP/串口目标区与播放条（本步只改 `DevReplayerView`） | [ ] | **← 当前下一步** |
 | U5 | 报文页对照原型：筛选（含 MQTT）、详情抽屉（本步只改 `PacketsView`） | [ ] | |
 | U6 | 对接说明页对照原型（本步只改 `QtArchitectureGuide`）；产品文案去「仅 Qt」口吻若需通用化 | [ ] | |
 | U7 | 顶栏 / 四 Tab 切换 / Toast（本步只改 `Header`+`App`）对照原型 | [ ] | |
@@ -81,7 +81,7 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **U3**）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **U4**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
 3. 视觉对照 Downloads 原型 `(1)`；引擎阶段未到前不要动 `engine/`
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
