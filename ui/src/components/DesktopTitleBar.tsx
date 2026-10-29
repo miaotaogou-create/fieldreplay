@@ -37,10 +37,6 @@ export const DesktopTitleBar: React.FC<DesktopTitleBarProps> = ({
         </span>
       </div>
 
-      <div className="hidden md:flex items-center gap-1 text-[10px] text-slate-500 font-mono pointer-events-none">
-        <span>x64 · 无边框窗体</span>
-      </div>
-
       <div className="flex items-center h-full -mr-3 fr-titlebar-no-drag">
         <button
           type="button"

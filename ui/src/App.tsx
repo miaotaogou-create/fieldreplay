@@ -428,7 +428,7 @@ export default function App() {
         </div>
       )}
 
-      <main className="flex-1 min-h-0 overflow-auto pb-4">
+      <main className="flex-1 min-h-0 overflow-auto pb-2">
         {currentTab === 'record' && (
           <FieldRecorderView
             channels={channels}
@@ -466,10 +466,8 @@ export default function App() {
         )}
       </main>
 
-      <footer className="py-3 border-t border-slate-200 text-center text-xs text-slate-500 bg-white shrink-0">
-        <span>FieldReplay · 工业上位机现场数据录制与高保真重演工作台</span>
-        <span className="mx-2">·</span>
-        <span>微秒时基无漂移 · 上位机改指向即可对接</span>
+      <footer className="py-1.5 border-t border-slate-200 text-center text-[11px] text-slate-500 bg-white shrink-0">
+        <span>FieldReplay · 微秒时基录放 · 上位机改指向即可对接</span>
         {!hasShellIpc() && (
           <>
             <span className="mx-2">·</span>

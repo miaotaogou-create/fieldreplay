@@ -54,22 +54,22 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const badge = engineBadge(engineState);
   return (
-    <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-white border-b border-slate-200 shrink-0 z-40">
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+    <header className="flex items-center justify-between gap-4 px-4 sm:px-5 py-2 bg-white border-b border-slate-200 shrink-0 z-40">
+      <div className="flex items-center gap-2.5 shrink-0">
+        <div className="w-7 h-7 rounded-md bg-sky-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
           FR
         </div>
         <div>
-          <span className="text-base font-bold tracking-tight text-slate-900 whitespace-nowrap">
+          <span className="text-sm font-bold tracking-tight text-slate-900 whitespace-nowrap">
             FieldReplay
           </span>
-          <span className="hidden sm:inline-block ml-2 text-xs text-slate-500 font-normal">
+          <span className="hidden lg:inline-block ml-2 text-[11px] text-slate-500 font-normal">
             上位机现场数据录制与高保真重演
           </span>
         </div>
       </div>
 
-      <nav className="flex items-center gap-1 sm:gap-2" aria-label="主功能切换">
+      <nav className="flex items-center gap-1" aria-label="主功能切换">
         {TABS.map(({ id, label, icon: Icon }) => {
           const active = currentTab === id;
           return (
@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={() => onTabChange(id)}
               aria-current={active ? 'page' : undefined}
-              className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 ${
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 active
                   ? 'bg-sky-50 text-sky-700 font-semibold'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
@@ -91,16 +91,16 @@ export const Header: React.FC<HeaderProps> = ({
         })}
       </nav>
 
-      <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         <span
-          className={`px-2 py-1 text-[11px] font-medium rounded-md border whitespace-nowrap ${badge.className}`}
+          className={`px-2 py-0.5 text-[11px] font-medium rounded-md border whitespace-nowrap ${badge.className}`}
         >
           {badge.label}
         </span>
         <button
           type="button"
           onClick={onLoadPreset}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors whitespace-nowrap shrink-0"
           title="载入工业现场伺服卡滞过流故障案例数据包（离线演示）"
         >
           <Sparkles className="w-3.5 h-3.5 text-sky-600" />

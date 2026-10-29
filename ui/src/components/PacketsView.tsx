@@ -146,9 +146,9 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
   ];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-3 space-y-3">
       {/* Filters & Actions Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white rounded-lg border border-slate-200 px-3 py-2 shadow-xs flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
             {filterTabs.map((tab) => (
@@ -217,7 +217,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
       </div>
 
       {/* Main Two-Pane: Left list + Right detail drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
           <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-semibold text-slate-700">
             <span>
@@ -306,7 +306,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
         </div>
 
         {/* 右侧详情抽屉 */}
-        <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4 lg:sticky lg:top-4 lg:self-start">
+        <div className="lg:col-span-5 bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-2.5 lg:sticky lg:top-2 lg:self-start">
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide">
               {selectedPacket

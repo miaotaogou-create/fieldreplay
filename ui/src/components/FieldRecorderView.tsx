@@ -308,42 +308,42 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 sm:px-5 py-3 space-y-3">
       {/* 3-Step Simple Guidance for Field Engineers */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+      <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2 pb-2 border-b border-slate-100">
           <div>
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-              现场数据无损录制 (Field Recorder)
+            <h1 className="text-sm font-bold text-slate-900 tracking-tight">
+              现场数据无损录制
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              现场人员专用：免装专业分析软件、免改上位机代码，3步一键录制所有外部硬件流
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              3 步：勾选信道 → 录制 → 打包发给研发
             </p>
           </div>
           {/* Quick Step Indicators */}
-          <div className="flex items-center gap-3 text-xs text-slate-500">
-            <span className="flex items-center gap-1.5 font-medium text-slate-700">
-              <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px]">1</span>
+          <div className="flex items-center gap-2 text-[11px] text-slate-500">
+            <span className="flex items-center gap-1 font-medium text-slate-700">
+              <span className="w-4 h-4 rounded-full bg-slate-900 text-white flex items-center justify-center text-[9px]">1</span>
               勾选信道
             </span>
             <span className="text-slate-300">→</span>
-            <span className="flex items-center gap-1.5 font-medium text-slate-700">
-              <span className="w-5 h-5 rounded-full bg-slate-900 text-white flex items-center justify-center text-[10px]">2</span>
+            <span className="flex items-center gap-1 font-medium text-slate-700">
+              <span className="w-4 h-4 rounded-full bg-slate-900 text-white flex items-center justify-center text-[9px]">2</span>
               点击录制
             </span>
             <span className="text-slate-300">→</span>
-            <span className="flex items-center gap-1.5 font-medium text-sky-600">
-              <span className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center text-[10px]">3</span>
+            <span className="flex items-center gap-1 font-medium text-sky-600">
+              <span className="w-4 h-4 rounded-full bg-sky-600 text-white flex items-center justify-center text-[9px]">3</span>
               打包发给研发
             </span>
           </div>
         </div>
 
         {/* Step 1: Channels Selector */}
-        <div className="pt-4">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-semibold text-slate-700 tracking-wide uppercase">
-              ① 现场输入信道 (勾选需要录制的硬件接口)
+        <div className="pt-2.5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-700 tracking-wide">
+              ① 现场输入信道
             </span>
             <button
               onClick={() => setShowAddChannelModal(true)}
@@ -354,18 +354,18 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {channels.map((chan) => (
               <div
                 key={chan.id}
                 onClick={() => onToggleChannel(chan.id)}
-                className={`cursor-pointer p-3.5 rounded-lg border transition-all text-left relative ${
+                className={`cursor-pointer p-2.5 rounded-md border transition-all text-left relative ${
                   chan.enabled
                     ? 'bg-slate-50 border-slate-300 shadow-xs ring-1 ring-sky-500/20'
                     : 'bg-white border-slate-200 opacity-60 hover:opacity-90'
                 }`}
               >
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -398,23 +398,23 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       </div>
 
       {/* Step 2: Main Master Recording Control Bar */}
-      <div className="bg-slate-900 text-white rounded-xl p-6 shadow-md border border-slate-800">
-        <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+      <div className="bg-slate-900 text-white rounded-lg px-3.5 py-3 shadow-md border border-slate-800">
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-3">
           {/* Big Recording Timer */}
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-3">
             <div className="relative">
               <div
-                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                   recordState === 'recording'
-                    ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-4 ring-rose-500/30'
+                    ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-500/30'
                     : recordState === 'paused'
                     ? 'bg-amber-500 text-white'
                     : 'bg-slate-800 text-slate-400'
                 }`}
               >
-                {recordState === 'recording' && <span className="w-5 h-5 rounded-sm bg-white" />}
-                {recordState === 'paused' && <Pause className="w-6 h-6" />}
-                {recordState === 'idle' && <Square className="w-5 h-5 text-slate-500" />}
+                {recordState === 'recording' && <span className="w-3.5 h-3.5 rounded-sm bg-white" />}
+                {recordState === 'paused' && <Pause className="w-4 h-4" />}
+                {recordState === 'idle' && <Square className="w-3.5 h-3.5 text-slate-500" />}
               </div>
             </div>
 
@@ -495,7 +495,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           </div>
 
           {/* Live Telemetry KPI counters */}
-          <div className="grid grid-cols-3 gap-6 text-center border-t lg:border-t-0 lg:border-l border-slate-800 pt-4 lg:pt-0 lg:pl-6 w-full lg:w-auto">
+          <div className="grid grid-cols-3 gap-3 text-center border-t lg:border-t-0 lg:border-l border-slate-800 pt-3 lg:pt-0 lg:pl-4 w-full lg:w-auto">
             <div>
               <div className="text-[10px] text-slate-400 uppercase tracking-wider">已录总帧数</div>
               <div className="text-lg font-bold font-mono text-slate-100 tabular-nums">
