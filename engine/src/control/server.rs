@@ -1,8 +1,8 @@
-//! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.*。
+//! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.*；可选 HTTP 静态 UI。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -13,32 +13,42 @@ use crate::fcap::{ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionRe
 use super::b64;
 use super::dto::{session_to_json, status_json};
 use super::hub::PushHub;
+use super::http_static::{self, get_path, is_head, serve_file, serve_no_ui};
 use super::json_util::{err_result, escape_str, extract_object, extract_str, ok_result};
 use super::live::{handle_record_start, handle_record_stop};
 use super::replay_live::{handle_replay_start, handle_replay_stop};
 use super::session_file::export_session_bytes;
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
-    accept_websocket, read_text_frame, write_text_frame as write_text_frame_server,
+    complete_websocket_upgrade, is_websocket_upgrade, read_http_headers, read_text_frame,
+    write_text_frame as write_text_frame_server,
 };
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:17890";
 pub const API_VERSION: u32 = 1;
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn serve(bind: SocketAddr) -> io::Result<()> {
+pub fn serve(bind: SocketAddr, ui_dir: Option<PathBuf>) -> io::Result<()> {
     let listener = TcpListener::bind(bind)?;
-    eprintln!("FieldReplay 控制面监听 ws://{bind} （API v{API_VERSION}）");
+    match &ui_dir {
+        Some(dir) => eprintln!(
+            "FieldReplay 控制面监听 http://{bind}/ 与 ws://{bind} （API v{API_VERSION}；UI={dir}）",
+            dir = dir.display()
+        ),
+        None => eprintln!("FieldReplay 控制面监听 ws://{bind} （API v{API_VERSION}；未挂载 UI）"),
+    }
     let state = Arc::new(Mutex::new(ControlState::new()));
     let hub = Arc::new(PushHub::new());
+    let ui = Arc::new(ui_dir);
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 let _ = stream.set_nodelay(true);
                 let st = Arc::clone(&state);
                 let hb = Arc::clone(&hub);
+                let ui_dir = Arc::clone(&ui);
                 thread::spawn(move || {
-                    if let Err(e) = handle_client(stream, st, hb) {
+                    if let Err(e) = handle_client(stream, st, hb, ui_dir.as_ref().as_ref()) {
                         eprintln!("控制面连接结束: {e}");
                     }
                 });
@@ -53,8 +63,36 @@ fn handle_client(
     mut stream: TcpStream,
     state: Arc<Mutex<ControlState>>,
     hub: Arc<PushHub>,
+    ui_dir: Option<&PathBuf>,
 ) -> io::Result<()> {
-    accept_websocket(&mut stream)?;
+    let req = read_http_headers(&mut stream)?;
+    if is_websocket_upgrade(&req) {
+        complete_websocket_upgrade(&mut stream, &req)?;
+        return handle_websocket(stream, state, hub);
+    }
+    if let Some(path) = get_path(&req) {
+        let head_only = is_head(&req);
+        return match ui_dir {
+            Some(dir) => serve_file(&mut stream, dir, &path, head_only),
+            None => serve_no_ui(&mut stream, head_only),
+        };
+    }
+    let _ = http_static::write_response(
+        &mut stream,
+        400,
+        "Bad Request",
+        "text/plain; charset=utf-8",
+        b"expected WebSocket upgrade or GET",
+        false,
+    );
+    Ok(())
+}
+
+fn handle_websocket(
+    mut stream: TcpStream,
+    state: Arc<Mutex<ControlState>>,
+    hub: Arc<PushHub>,
+) -> io::Result<()> {
     let mut writer = stream.try_clone()?;
     let (tx, rx) = mpsc::sync_channel::<String>(256);
     let client_id = hub.register(tx.clone());
@@ -333,7 +371,7 @@ pub fn self_check_control() -> io::Result<()> {
     let hb = Arc::clone(&hub);
     thread::spawn(move || {
         if let Ok((stream, _)) = listener.accept() {
-            let _ = handle_client(stream, st, hb);
+            let _ = handle_client(stream, st, hb, None);
         }
     });
 
@@ -378,6 +416,85 @@ pub fn self_check_control() -> io::Result<()> {
     // E5c：先测重放（会话仍是 sample.fcap），再测录制（会覆盖内存会话）
     self_check_replay_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
+    // E6a：同端口静态 UI
+    self_check_http_static()?;
+    Ok(())
+}
+
+fn self_check_http_static() -> io::Result<()> {
+    let dir = std::env::temp_dir().join("fieldreplay_e6a_ui");
+    let _ = std::fs::create_dir_all(&dir);
+    let index = dir.join("index.html");
+    std::fs::write(&index, b"<!doctype html><title>e6a</title>ok-e6a")?;
+
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = listener.local_addr()?;
+    let state = Arc::new(Mutex::new(ControlState::new()));
+    let hub = Arc::new(PushHub::new());
+    let ui = dir.clone();
+    thread::spawn(move || {
+        // 连续接两路：GET / 与 WS，验证同端口分流
+        for _ in 0..2 {
+            if let Ok((stream, _)) = listener.accept() {
+                let st = Arc::clone(&state);
+                let hb = Arc::clone(&hub);
+                let ui_dir = ui.clone();
+                let _ = handle_client(stream, st, hb, Some(&ui_dir));
+            }
+        }
+    });
+    thread::sleep(Duration::from_millis(50));
+
+    {
+        let mut http = TcpStream::connect(addr)?;
+        http.set_read_timeout(Some(Duration::from_secs(3)))?;
+        http.set_write_timeout(Some(Duration::from_secs(3)))?;
+        http.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")?;
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 512];
+        loop {
+            match http.read(&mut tmp) {
+                Ok(0) => break,
+                Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut => {
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") && buf.len() > 64 {
+                // 等到有 body
+                if buf.windows(b"ok-e6a".len()).any(|w| w == b"ok-e6a") {
+                    break;
+                }
+            }
+        }
+        let resp = String::from_utf8_lossy(&buf);
+        if !resp.contains("200 OK") || !resp.contains("ok-e6a") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("静态 GET / 失败: {resp}"),
+            ));
+        }
+    }
+
+    {
+        let mut client = TcpStream::connect(addr)?;
+        client.set_read_timeout(Some(Duration::from_secs(3)))?;
+        client.set_write_timeout(Some(Duration::from_secs(3)))?;
+        ws_client_handshake(&mut client)?;
+        write_text_frame_client(&mut client, r#"{"id":"e6a","cmd":"ping"}"#)?;
+        let pong = read_text_frame(&mut client)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::UnexpectedEof, "静态口 WS ping 无响应")
+        })?;
+        if !pong.contains("\"pong\":true") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("静态口 WS ping 失败: {pong}"),
+            ));
+        }
+    }
+
+    eprintln!("  控制面 HTTP 静态 UI + 同端口 WS：通过");
     Ok(())
 }
 

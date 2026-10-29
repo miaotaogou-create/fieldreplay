@@ -63,14 +63,14 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>]
-  fieldreplay-engine serve   [--bind 127.0.0.1:17890]
+  fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
 --bind / --port / --tcp / --mqtt 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
-serve：本机 WebSocket 控制面（供 UI 开发预览；cmd: ping/status/session.*/record.*/replay.start|stop）。
+serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
     );
 }
@@ -79,6 +79,7 @@ fn cmd_serve(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut bind: SocketAddr = DEFAULT_BIND.parse().map_err(|e| {
         io::Error::new(io::ErrorKind::InvalidInput, format!("默认 bind: {e}"))
     })?;
+    let mut ui_dir: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--bind" => {
@@ -89,12 +90,25 @@ fn cmd_serve(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                     io::Error::new(io::ErrorKind::InvalidInput, format!("bind: {e}"))
                 })?;
             }
+            "--ui-dir" => {
+                let v = args
+                    .next()
+                    .ok_or_else(|| err_arg("--ui-dir 需要目录"))?;
+                let p = PathBuf::from(&v);
+                if !p.is_dir() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("--ui-dir 不是目录: {v}"),
+                    ));
+                }
+                ui_dir = Some(p);
+            }
             other => {
                 return Err(err_arg(format!("serve 未知参数: {other}")));
             }
         }
     }
-    serve_control(bind)
+    serve_control(bind, ui_dir)
 }
 
 fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {

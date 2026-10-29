@@ -6,11 +6,12 @@
 - **实验室**：按时间轴将录制包灌回真实上位机  
 - **交付**：Windows 单入口客户端（双击 EXE 出窗口，不靠系统浏览器）
 
-当前：界面可开发预览；引擎 **E5a**（录放 CLI + `serve` WebSocket 控制面）；UI 可连引擎载入真实 `.fcap`。下一步 E5b 录制去 mock，见 `PROGRESS.md`。
+当前：引擎 **E6a**（录放 + `serve` WS；可选 `--ui-dir` 托管静态 UI）。下一步 **E6b** 薄壳 WebView2 窗口，见 `PROGRESS.md`。
 
 ## 开发期预览（非交付形态）
 
 ```bat
+REM 方式 1：Vite 热更新
 REM 终端 A
 cd engine
 cargo run -- serve
@@ -21,7 +22,16 @@ npm install --legacy-peer-deps
 npm run dev
 ```
 
-浏览器打开 `http://localhost:3000`；顶栏显示「引擎已连接」后，在重演页载入二进制 `.fcap`。正式交付为内嵌 UI 的桌面客户端，见 E6。
+浏览器打开 `http://localhost:3000`。
+
+```bat
+REM 方式 2：引擎托管已构建 UI（更接近交付）
+cd ui && npm run build
+cd ..\engine
+cargo run -- serve --ui-dir ..\ui\dist
+```
+
+浏览器打开 `http://127.0.0.1:17890/`。正式交付为双击 EXE 出本机窗口（E6b+），不经系统浏览器。
 
 ## 引擎
 

@@ -8,7 +8,8 @@ use super::sha1;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-pub fn accept_websocket(stream: &mut TcpStream) -> io::Result<()> {
+/// 读完整 HTTP 请求头（至 `\r\n\r\n`）。
+pub fn read_http_headers(stream: &mut TcpStream) -> io::Result<String> {
     let mut buf = Vec::with_capacity(1024);
     let mut tmp = [0u8; 256];
     loop {
@@ -30,28 +31,38 @@ pub fn accept_websocket(stream: &mut TcpStream) -> io::Result<()> {
             ));
         }
     }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
 
-    let req = String::from_utf8_lossy(&buf);
-    let mut key = None;
+pub fn is_websocket_upgrade(req: &str) -> bool {
     let mut upgrade_ws = false;
     let mut connection_upgrade = false;
     for line in req.lines() {
         let lower = line.to_ascii_lowercase();
-        if lower.starts_with("sec-websocket-key:") {
-            key = Some(line.split_once(':').map(|(_, v)| v.trim().to_string()).unwrap());
-        } else if lower.starts_with("upgrade:") && lower.contains("websocket") {
+        if lower.starts_with("upgrade:") && lower.contains("websocket") {
             upgrade_ws = true;
         } else if lower.starts_with("connection:") && lower.contains("upgrade") {
             connection_upgrade = true;
         }
     }
+    upgrade_ws && connection_upgrade
+}
 
-    if !upgrade_ws || !connection_upgrade {
+pub fn complete_websocket_upgrade(stream: &mut TcpStream, req: &str) -> io::Result<()> {
+    if !is_websocket_upgrade(req) {
         let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "非 WebSocket 升级请求",
         ));
+    }
+    let mut key = None;
+    for line in req.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("sec-websocket-key:") {
+            key = Some(line.split_once(':').map(|(_, v)| v.trim().to_string()).unwrap());
+            break;
+        }
     }
     let key = key.ok_or_else(|| {
         io::Error::new(io::ErrorKind::InvalidData, "缺少 Sec-WebSocket-Key")
