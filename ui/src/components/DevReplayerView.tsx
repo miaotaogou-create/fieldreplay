@@ -345,15 +345,17 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               disabled={!hasPackets}
               className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none accent-sky-500 hover:accent-sky-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:accent-sky-500"
             />
-            {/* Anomaly Marker Indicator if present in packet */}
+            {/* 故障点：菱形标记（避免两根竖条像「暂停」） */}
             {totalDurationUs > 0 &&
               packets.map((p, idx) =>
                 p.hasError ? (
-                  <div
+                  <button
                     key={p.id}
+                    type="button"
                     onClick={() => setCurrentIndex(idx)}
-                    title={`故障点: ${p.errorReason || '异常'}`}
-                    className="absolute top-0 w-1.5 h-3.5 bg-rose-500 cursor-pointer -translate-x-1/2 hover:scale-125 transition-transform"
+                    title={`故障点：${p.errorReason || '异常帧'}（点击跳转）`}
+                    aria-label={`故障点：${p.errorReason || '异常帧'}`}
+                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2.5 h-2.5 rotate-45 bg-rose-500 border border-rose-200 shadow-sm cursor-pointer hover:scale-150 transition-transform z-10"
                     style={{ left: `${(p.timestampUs / totalDurationUs) * 100}%` }}
                   />
                 ) : null
@@ -1150,9 +1152,10 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   <strong className="text-slate-900 text-xs">{currentPacket.length} Bytes</strong>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block uppercase">协议识别</span>
+                  <span className="text-[10px] text-slate-400 block uppercase">通道类型</span>
                   <strong className="text-sky-700 text-xs">
-                    {currentPacket.protocolHint || 'Raw Binary'}
+                    {currentPacket.channelType.toUpperCase()}
+                    {currentPacket.protocolHint ? ` · ${currentPacket.protocolHint}` : ''}
                   </strong>
                 </div>
               </div>
@@ -1167,7 +1170,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                 </div>
               )}
 
-              {/* Hex Dump & ASCII */}
+              {/* Hex：只展示原始字节，不做业务协议解包 */}
               <div>
                 <span className="text-[11px] font-sans font-semibold text-slate-700 block mb-1">
                   原始字节数据 (HEX Dump):
@@ -1176,28 +1179,6 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   <div className="text-emerald-400 select-all">{currentPacket.hexPreview}</div>
                 </div>
               </div>
-
-              {/* Parsed Fields if available */}
-              {currentPacket.parsedFields && (
-                <div>
-                  <span className="text-[11px] font-sans font-semibold text-slate-700 block mb-1">
-                    协议字段解析 (Protocol Breakdown):
-                  </span>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {Object.entries(currentPacket.parsedFields).map(([k, v]) => (
-                      <div
-                        key={k}
-                        className="p-2 bg-slate-50 border border-slate-100 rounded font-sans"
-                      >
-                        <span className="text-[10px] text-slate-400 block">{k}</span>
-                        <span className="text-xs font-semibold text-slate-800 font-mono">
-                          {String(v)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-2">

@@ -195,7 +195,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索 HEX / Topic / 字段..."
+              placeholder="搜索 HEX / ASCII / Topic..."
               className="text-xs bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500 w-52"
             />
           </div>
@@ -360,14 +360,18 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                   </div>
                 </div>
                 <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-100 col-span-2">
-                  <div className="text-[10px] text-slate-400">协议类型</div>
+                  <div className="text-[10px] text-slate-400">通道类型</div>
                   <div className="font-semibold text-sky-700 flex items-center gap-2">
                     <span
                       className={`text-[10px] px-1.5 py-0.5 rounded border ${TYPE_BADGE[selectedPacket.channelType]}`}
                     >
                       {TYPE_LABEL[selectedPacket.channelType]}
                     </span>
-                    {selectedPacket.protocolHint || '通用二进制'}
+                    <span className="text-slate-500 font-normal text-xs">
+                      {selectedPacket.protocolHint
+                        ? `样本提示：${selectedPacket.protocolHint}`
+                        : '原始二进制（不解析业务协议）'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -411,27 +415,6 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                   {selectedPacket.asciiPreview}
                 </div>
               </div>
-
-              {selectedPacket.parsedFields && (
-                <div>
-                  <div className="text-[11px] font-sans font-semibold text-slate-700 mb-1.5">
-                    协议字段智能解包:
-                  </div>
-                  <div className="space-y-1.5 font-sans">
-                    {Object.entries(selectedPacket.parsedFields).map(([k, v]) => (
-                      <div
-                        key={k}
-                        className="flex items-center justify-between gap-3 p-2 bg-slate-50 rounded border border-slate-100"
-                      >
-                        <span className="text-slate-500 text-xs shrink-0">{k}</span>
-                        <span className="font-mono font-semibold text-slate-900 text-xs text-right break-all">
-                          {String(v)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <div className="text-center py-10 text-slate-400 text-xs font-sans space-y-1">
