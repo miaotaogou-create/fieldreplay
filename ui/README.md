@@ -1,20 +1,21 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# FieldReplay 界面预览
 
-# Run and deploy your AI Studio app
+本目录是 FieldReplay 的 React 界面壳（Vite + Tailwind），用于本地预览录制 / 重演 / 报文 / 对接说明四页。当前为 mock 数据，尚未对接原生录放引擎。
 
-This contains everything you need to run your app locally.
+## 本地运行
 
-View your app in AI Studio: https://ai.studio/apps/ecceb28e-95ad-435a-83c8-9985a0c79d30
+前提：已安装 Node.js。
 
-## Run Locally
+```bat
+cd ui
+npm install
+npm run dev
+```
 
-**Prerequisites:**  Node.js
+浏览器打开终端提示的地址（默认 `http://localhost:3000`）。
 
+## 说明
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- 无需 API Key 或云端密钥；纯本地静态预览。
+- 产品目标与验收见仓库根目录 `docs/requirements/`、`PROGRESS.md`。
+- 引擎与 `.fcap` 落盘在界面阶段完成后再做，见进度本阶段 E。
