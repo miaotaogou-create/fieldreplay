@@ -217,7 +217,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
       </div>
 
       {/* Main Two-Pane: Left list + Right detail drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-2 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
         <div className="lg:col-span-7 bg-white rounded-lg border border-slate-200 overflow-hidden shadow-xs flex flex-col min-h-0">
           <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-semibold text-slate-700 shrink-0">
             <span>

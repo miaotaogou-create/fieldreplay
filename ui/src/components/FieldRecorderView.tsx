@@ -354,7 +354,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 max-h-[22vh] overflow-y-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 max-h-[22vh] overflow-y-auto">
             {channels.map((chan) => (
               <div
                 key={chan.id}

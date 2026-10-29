@@ -579,9 +579,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       </div>
 
       {/* 下方面板随窗口伸缩；内容过多时仅此区域滚动 */}
-      <div className="fr-page-scroll flex flex-col gap-2">
+      <div className="fr-page-scroll flex flex-col gap-3">
       {/* Target Output Mapping & Fault Injection Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 shrink-0">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 shrink-0">
         {/* Card 1: Replay Output Target Configuration */}
         <div className="bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs">
           <div className="flex items-center justify-between pb-2 border-b border-slate-100">
@@ -1134,7 +1134,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       </div>
 
       {/* Current Replaying Packet Inspector & Dispatched Stream */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-2.5 space-y-2 shadow-xs">
           <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 gap-2">
             <h3 className="text-xs font-bold text-slate-900 tracking-wide">

@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
-/* 主区随窗口高度伸缩：矮屏压间距，高屏略松 */
+/* 主区随窗口高度伸缩：卡片间距略松，矮屏仍略收 */
 :root {
-  --fr-page-gap: 0.5rem;
-  --fr-page-pad-y: 0.5rem;
-  --fr-page-pad-x: 0.75rem;
+  --fr-page-gap: 0.875rem;
+  --fr-page-pad-y: 0.625rem;
+  --fr-page-pad-x: 0.875rem;
 }
 
 @media (min-height: 960px) {
   :root {
-    --fr-page-gap: 0.75rem;
-    --fr-page-pad-y: 0.75rem;
-    --fr-page-pad-x: 1rem;
+    --fr-page-gap: 1.125rem;
+    --fr-page-pad-y: 0.875rem;
+    --fr-page-pad-x: 1.125rem;
   }
 }
 
 @media (max-height: 760px) {
   :root {
-    --fr-page-gap: 0.375rem;
-    --fr-page-pad-y: 0.375rem;
-    --fr-page-pad-x: 0.625rem;
+    --fr-page-gap: 0.625rem;
+    --fr-page-pad-y: 0.5rem;
+    --fr-page-pad-x: 0.75rem;
   }
 }
 
