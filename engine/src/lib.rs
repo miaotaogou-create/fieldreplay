@@ -20,8 +20,8 @@ pub use fcap::{
     FLAG_FINALIZED, FLAG_HAS_META, FCAP_MAGIC, FCAP_VERSION_V1, HEADER_BYTES,
 };
 pub use mqtt::{
-    apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, pack_mqtt_flags, MiniBroker,
-    MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
+    apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, pack_mqtt_flags,
+    write_test_ca_file, MiniBroker, MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
 };
 pub use rtsp::{MiniRtspServer, RtspClient, RtspUrl};
 pub use record::{

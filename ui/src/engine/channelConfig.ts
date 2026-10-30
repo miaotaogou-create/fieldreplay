@@ -42,6 +42,11 @@ export function channelToEngineConfig(ch: ChannelConfig): Record<string, unknown
       };
       if (ch.params.mqttUsername) cfg.username = ch.params.mqttUsername;
       if (ch.params.mqttPassword) cfg.password = ch.params.mqttPassword;
+      if (ch.params.mqttTls) {
+        cfg.tls = true;
+        if (ch.params.mqttCaCertPath) cfg.ca_cert_path = ch.params.mqttCaCertPath;
+        if (ch.params.mqttTlsServerName) cfg.tls_server_name = ch.params.mqttTlsServerName;
+      }
       return cfg;
     }
     case 'video_stream': {

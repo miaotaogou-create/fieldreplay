@@ -9,10 +9,11 @@ use super::codec::{
     encode_connect, encode_disconnect, encode_pingreq, encode_puback, encode_pubcomp,
     encode_publish, encode_pubrel, encode_subscribe, decode_packet, Incoming, Publish,
 };
+use super::stream::{open_mqtt_stream, MqttStream};
 use super::MqttConfig;
 
 pub struct MqttClient {
-    stream: TcpStream,
+    stream: MqttStream,
     buf: Vec<u8>,
     next_packet_id: u16,
 }
@@ -20,10 +21,18 @@ pub struct MqttClient {
 impl MqttClient {
     pub fn connect(config: &MqttConfig, read_timeout: Duration) -> io::Result<Self> {
         let addr = config.socket_addr()?;
-        let stream = TcpStream::connect(addr)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(read_timeout))?;
-        stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+        let tcp = TcpStream::connect(addr)?;
+        tcp.set_nodelay(true)?;
+        tcp.set_read_timeout(Some(read_timeout))?;
+        tcp.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+        let stream = open_mqtt_stream(
+            tcp,
+            config.tls,
+            &config.broker,
+            config.ca_path(),
+            config.tls_server_name.as_deref(),
+        )?;
 
         let client_id = format!("fieldreplay-{}", std::process::id());
         let mut client = Self {

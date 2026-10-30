@@ -1,17 +1,21 @@
-//! 自检用迷你 MQTT Broker（单机环回；非生产级）。
+//! 自检用迷你 MQTT Broker（单机环回；非生产级）。支持可选 TLS（E9b）。
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use rustls::ServerConfig;
+
 use super::codec::{
     decode_packet, encode_connack, encode_pingresp, encode_puback, encode_pubcomp, encode_publish,
     encode_pubrec, encode_pubrel, encode_suback, topic_matches, Incoming, Publish,
 };
+use super::stream::MqttStream;
+use super::tls;
 
 struct Sub {
     filter: String,
@@ -19,7 +23,7 @@ struct Sub {
 }
 
 struct ClientState {
-    stream: TcpStream,
+    stream: MqttStream,
     subs: Vec<Sub>,
     buf: Vec<u8>,
 }
@@ -41,11 +45,24 @@ pub struct MiniBroker {
 
 impl MiniBroker {
     pub fn start() -> io::Result<Self> {
-        Self::start_with_auth(None)
+        Self::start_inner(None, None)
     }
 
     /// E9a 自检：要求 CONNECT 带匹配的 username/password。
     pub fn start_with_auth(auth: Option<(String, String)>) -> io::Result<Self> {
+        Self::start_inner(auth, None)
+    }
+
+    /// E9b 自检：TLS + 嵌入测试证书；可选鉴权。
+    pub fn start_tls(auth: Option<(String, String)>) -> io::Result<Self> {
+        let server_config = tls::build_test_server_config()?;
+        Self::start_inner(auth, Some(server_config))
+    }
+
+    fn start_inner(
+        auth: Option<(String, String)>,
+        tls_config: Option<Arc<ServerConfig>>,
+    ) -> io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
@@ -60,7 +77,7 @@ impl MiniBroker {
         let shared_bg = Arc::clone(&shared);
 
         let join = thread::spawn(move || {
-            if let Err(e) = run_broker(listener, shared_bg, &stop_bg) {
+            if let Err(e) = run_broker(listener, shared_bg, &stop_bg, tls_config) {
                 eprintln!("迷你 Broker 退出: {e}");
             }
         });
@@ -97,13 +114,24 @@ fn run_broker(
     listener: TcpListener,
     shared: Arc<Mutex<Shared>>,
     stop: &AtomicBool,
+    tls_config: Option<Arc<ServerConfig>>,
 ) -> io::Result<()> {
     while !stop.load(Ordering::SeqCst) {
         match listener.accept() {
-            Ok((stream, _)) => {
-                stream.set_nodelay(true)?;
-                stream.set_nonblocking(false)?;
-                stream.set_read_timeout(Some(Duration::from_millis(20)))?;
+            Ok((tcp, _)) => {
+                tcp.set_nodelay(true)?;
+                tcp.set_nonblocking(false)?;
+                tcp.set_read_timeout(Some(Duration::from_millis(20)))?;
+                let stream = match &tls_config {
+                    Some(cfg) => match MqttStream::accept_tls_server(tcp, Arc::clone(cfg)) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("迷你 Broker TLS 握手失败: {e}");
+                            continue;
+                        }
+                    },
+                    None => MqttStream::connect_plain(tcp),
+                };
                 let mut g = shared.lock().unwrap();
                 let id = g.next_id;
                 g.next_id += 1;

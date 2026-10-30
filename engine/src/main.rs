@@ -62,6 +62,7 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
                              [--duration <秒>]
   fieldreplay-engine record  --mqtt <host:port> --topic <filter> [--qos 0|1|2] \\
                              [--mqtt-user <u>] [--mqtt-password <p>] \\
+                             [--mqtt-tls] [--mqtt-ca <pem>] [--mqtt-tls-server-name <名>] \\
                              --out <file.fcap> [--duration <秒>]
   fieldreplay-engine record  --rtsp <rtsp://host[:port]/path> --out <file.fcap> [--duration <秒>]
   fieldreplay-engine replay  --in <file.fcap> --target <ip:port>
@@ -69,14 +70,16 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>] \\
-                             [--mqtt-user <u>] [--mqtt-password <p>]
+                             [--mqtt-user <u>] [--mqtt-password <p>] \\
+                             [--mqtt-tls] [--mqtt-ca <pem>] [--mqtt-tls-server-name <名>]
   fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
 --bind / --port / --tcp / --mqtt / --rtsp 互斥；replay 的 --target / --rtsp-listen / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
-MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）；可选 --mqtt-user/--mqtt-password（E9a）。
+MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）；可选 --mqtt-user/--mqtt-password（E9a）；
+可选 --mqtt-tls / --mqtt-ca / --mqtt-tls-server-name（E9b，常用口 8883）。
 RTSP：录=交织 TCP 拉流（E7c）；重放 --rtsp-listen 作服务端按时间轴吐块（E7d；不解 NAL）。
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
@@ -129,6 +132,9 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut mqtt_qos: u8 = 0;
     let mut mqtt_user: Option<String> = None;
     let mut mqtt_password: Option<String> = None;
+    let mut mqtt_tls = false;
+    let mut mqtt_ca: Option<PathBuf> = None;
+    let mut mqtt_tls_server_name: Option<String> = None;
     let mut rtsp_url: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -197,6 +203,21 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 mqtt_password = Some(
                     args.next()
                         .ok_or_else(|| err_arg("--mqtt-password 需要密码"))?,
+                );
+            }
+            "--mqtt-tls" => {
+                mqtt_tls = true;
+            }
+            "--mqtt-ca" => {
+                mqtt_ca = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-ca 需要 PEM 路径"))?,
+                ));
+            }
+            "--mqtt-tls-server-name" => {
+                mqtt_tls_server_name = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-tls-server-name 需要主机名"))?,
                 );
             }
             "--rtsp" => {
@@ -317,7 +338,8 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             topic.clone(),
             mqtt_qos,
         )
-        .with_credentials(mqtt_user, mqtt_password);
+        .with_credentials(mqtt_user, mqtt_password)
+        .with_tls(mqtt_tls, mqtt_ca, mqtt_tls_server_name);
         let opts = MqttRecordOptions {
             config,
             out_path: out,
@@ -378,6 +400,9 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut topic_prefix = String::new();
     let mut mqtt_user: Option<String> = None;
     let mut mqtt_password: Option<String> = None;
+    let mut mqtt_tls = false;
+    let mut mqtt_ca: Option<PathBuf> = None;
+    let mut mqtt_tls_server_name: Option<String> = None;
     let mut port_name: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -435,6 +460,21 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 mqtt_password = Some(
                     args.next()
                         .ok_or_else(|| err_arg("--mqtt-password 需要密码"))?,
+                );
+            }
+            "--mqtt-tls" => {
+                mqtt_tls = true;
+            }
+            "--mqtt-ca" => {
+                mqtt_ca = Some(PathBuf::from(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-ca 需要 PEM 路径"))?,
+                ));
+            }
+            "--mqtt-tls-server-name" => {
+                mqtt_tls_server_name = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-tls-server-name 需要主机名"))?,
                 );
             }
             "--port" => {
@@ -542,6 +582,9 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             qos_override: None,
             username: mqtt_user,
             password: mqtt_password,
+            tls: if mqtt_tls { Some(true) } else { None },
+            ca_cert_path: mqtt_ca,
+            tls_server_name: mqtt_tls_server_name,
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
             fault: FaultInjection::OFF,
@@ -723,6 +766,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: MQTT 用户名密码鉴权… ");
     let _ = io::stdout().flush();
     mqtt_auth_check()?;
+    println!("ok");
+
+    print!("self-check: MQTT TLS（自定义 CA）… ");
+    let _ = io::stdout().flush();
+    mqtt_tls_check()?;
     println!("ok");
 
     print!("self-check: 控制面 WebSocket… ");
@@ -1660,6 +1708,9 @@ fn mqtt_loopback_check() -> io::Result<()> {
         qos_override: Some(0),
         username: None,
         password: None,
+        tls: None,
+        ca_cert_path: None,
+        tls_server_name: None,
         poll_timeout: Duration::from_millis(50),
         speed: 1.0,
         fault: FaultInjection::OFF,
@@ -1725,6 +1776,48 @@ fn mqtt_auth_check() -> io::Result<()> {
         .with_credentials(Some("field".into()), Some("s3cret".into()));
     let client = MqttClient::connect(&good, Duration::from_millis(200))?;
     let _ = client.disconnect();
+    broker.stop();
+    Ok(())
+}
+
+/// E9b：TLS Broker + 自定义 CA 可 CONNECT。
+fn mqtt_tls_check() -> io::Result<()> {
+    use fieldreplay_engine::write_test_ca_file;
+    use std::thread;
+
+    let broker = MiniBroker::start_tls(None)?;
+    let addr = broker.addr();
+    thread::sleep(Duration::from_millis(40));
+
+    let ca_path = std::env::temp_dir().join(format!(
+        "fieldreplay-mqtt-ca-{}.pem",
+        std::process::id()
+    ));
+    write_test_ca_file(&ca_path)?;
+
+    // 无 TLS 连 TLS 口应失败
+    let plain = MqttConfig::new(addr.ip().to_string(), addr.port(), "t", 0);
+    if MqttClient::connect(&plain, Duration::from_millis(300)).is_ok() {
+        let _ = std::fs::remove_file(&ca_path);
+        broker.stop();
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "明文客户端不应连上 TLS Broker",
+        ));
+    }
+
+    let tls_cfg = MqttConfig::new(addr.ip().to_string(), addr.port(), "t", 0).with_tls(
+        true,
+        Some(ca_path.clone()),
+        Some("localhost".into()),
+    );
+    let mut client = MqttClient::connect(&tls_cfg, Duration::from_millis(500)).map_err(|e| {
+        let _ = std::fs::remove_file(&ca_path);
+        e
+    })?;
+    client.subscribe("t", 0)?;
+    let _ = client.disconnect();
+    let _ = std::fs::remove_file(&ca_path);
     broker.stop();
     Ok(())
 }

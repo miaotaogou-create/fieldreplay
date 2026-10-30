@@ -88,6 +88,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     'serial' | 'udp' | 'tcp' | 'mqtt' | 'video_stream'
   >('serial');
   const [newChanParam, setNewChanParam] = useState('COM4, 921600, 8-N-1');
+  const [newChanMqttTls, setNewChanMqttTls] = useState(false);
+  const [newChanMqttCa, setNewChanMqttCa] = useState('');
+  const [newChanMqttSni, setNewChanMqttSni] = useState('');
   const [serialPorts, setSerialPorts] = useState<string[]>([...FALLBACK_SERIAL_PORTS]);
   const [serialListHint, setSerialListHint] = useState<string | null>(null);
 
@@ -302,6 +305,15 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         mqttPassword: isMqtt
           ? (newChanParam.split(',')[3]?.trim() || undefined)
           : undefined,
+        mqttTls: isMqtt ? newChanMqttTls : undefined,
+        mqttCaCertPath:
+          isMqtt && newChanMqttTls && newChanMqttCa.trim()
+            ? newChanMqttCa.trim()
+            : undefined,
+        mqttTlsServerName:
+          isMqtt && newChanMqttTls && newChanMqttSni.trim()
+            ? newChanMqttSni.trim()
+            : undefined,
       },
       connected: true,
       rxBytes: 0,
@@ -896,8 +908,12 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                     onClick={() => {
                       setNewChanType(t.id);
                       if (t.id === 'serial') setNewChanParam('COM4, 921600, 8-N-1');
-                      else if (t.id === 'mqtt') setNewChanParam('127.0.0.1:1883, factory/+/telemetry');
-                      else if (t.id === 'video_stream') setNewChanParam('0.0.0.0:5004');
+                      else if (t.id === 'mqtt') {
+                        setNewChanParam('127.0.0.1:1883, factory/+/telemetry');
+                        setNewChanMqttTls(false);
+                        setNewChanMqttCa('');
+                        setNewChanMqttSni('');
+                      } else if (t.id === 'video_stream') setNewChanParam('0.0.0.0:5004');
                       else setNewChanParam('0.0.0.0:8888');
                     }}
                     className={`py-2 px-1 rounded-lg font-medium border text-center leading-tight ${
@@ -973,6 +989,48 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 focus:bg-white"
                 required
               />
+              {newChanType === 'mqtt' && (
+                <div className="mt-2 space-y-1.5">
+                  <label className="flex items-center gap-2 text-xs text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={newChanMqttTls}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setNewChanMqttTls(on);
+                        if (on && newChanParam.startsWith('127.0.0.1:1883')) {
+                          setNewChanParam(
+                            newChanParam.replace('127.0.0.1:1883', '127.0.0.1:8883')
+                          );
+                        } else if (!on && newChanParam.startsWith('127.0.0.1:8883')) {
+                          setNewChanParam(
+                            newChanParam.replace('127.0.0.1:8883', '127.0.0.1:1883')
+                          );
+                        }
+                      }}
+                    />
+                    TLS（mqtts，常用口 8883）
+                  </label>
+                  {newChanMqttTls && (
+                    <>
+                      <input
+                        type="text"
+                        value={newChanMqttCa}
+                        onChange={(e) => setNewChanMqttCa(e.target.value)}
+                        placeholder="CA PEM 路径（可选；空=系统根）"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-mono focus:bg-white"
+                      />
+                      <input
+                        type="text"
+                        value={newChanMqttSni}
+                        onChange={(e) => setNewChanMqttSni(e.target.value)}
+                        placeholder="TLS 服务器名 / SNI（可选）"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-mono focus:bg-white"
+                      />
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button

@@ -939,6 +939,10 @@ pub struct MqttReplayOptions {
     /// CONNECT 凭据；`None` 时回退到会话通道 config_json（E9a）。
     pub username: Option<String>,
     pub password: Option<String>,
+    /// TLS；`None` 时回退会话 config_json（E9b）。
+    pub tls: Option<bool>,
+    pub ca_cert_path: Option<std::path::PathBuf>,
+    pub tls_server_name: Option<String>,
     pub poll_timeout: Duration,
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
@@ -986,13 +990,23 @@ pub fn replay_mqtt_from_file_with(
         .password
         .clone()
         .or_else(|| recorded_cfg.password.clone());
+    let tls = opts.tls.unwrap_or(recorded_cfg.tls);
+    let ca_cert_path = opts
+        .ca_cert_path
+        .clone()
+        .or_else(|| recorded_cfg.ca_cert_path.clone());
+    let tls_server_name = opts
+        .tls_server_name
+        .clone()
+        .or_else(|| recorded_cfg.tls_server_name.clone());
     let config = MqttConfig::new(
         opts.broker.ip().to_string(),
         opts.broker.port(),
         recorded_cfg.topic.clone(),
         recorded_cfg.qos,
     )
-    .with_credentials(username, password);
+    .with_credentials(username, password)
+    .with_tls(tls, ca_cert_path, tls_server_name);
 
     let speed = SessionClock::clamp_speed(opts.speed);
     let fault = opts.fault.clamped();

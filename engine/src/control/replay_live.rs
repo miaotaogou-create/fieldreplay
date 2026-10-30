@@ -369,6 +369,12 @@ fn run_replay(
             };
             let username = extract_str(config, "username").filter(|s| !s.is_empty());
             let password = extract_str(config, "password").filter(|s| !s.is_empty());
+            let tls = extract_bool(config, "tls");
+            let ca_cert_path = extract_str(config, "ca_cert_path")
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from);
+            let tls_server_name =
+                extract_str(config, "tls_server_name").filter(|s| !s.is_empty());
             let opts = MqttReplayOptions {
                 in_path: in_path.to_path_buf(),
                 broker,
@@ -376,6 +382,9 @@ fn run_replay(
                 qos_override: None,
                 username,
                 password,
+                tls,
+                ca_cert_path,
+                tls_server_name,
                 poll_timeout: poll,
                 speed,
                 fault,

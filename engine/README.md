@@ -1,6 +1,6 @@
 # FieldReplay 引擎
 
-原生录放热路径（Rust，仅标准库）。当前完成 **E6a**：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。桌面窗口见仓库 `shell/`（E6b）。
+原生录放热路径（Rust；MQTT TLS 用 rustls，其余以标准库为主）。当前完成 **E6a** 及后续增强（含 E9 MQTT 凭据/TLS）：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。桌面窗口见仓库 `shell/`（E6b）。
 
 格式契约：[`../docs/design/fcap-format.md`](../docs/design/fcap-format.md)。
 
@@ -37,20 +37,22 @@ REM TCP 录制（工具角色 server=listen / client=connect）
 fieldreplay-engine record --tcp-role server --tcp 0.0.0.0:9000 --out session.fcap
 fieldreplay-engine record --tcp-role client --tcp 127.0.0.1:9000 --out session.fcap --duration 10
 
-REM MQTT 录制（连 Broker 订阅；顶替上位机；可选 --mqtt-user / --mqtt-password）
+REM MQTT 录制（连 Broker 订阅；顶替上位机；可选凭据 / TLS）
 fieldreplay-engine record --mqtt 127.0.0.1:1883 --topic factory/line3/# --qos 0 --out session.fcap
 fieldreplay-engine record --mqtt 127.0.0.1:1883 --topic sensor/+/telemetry --qos 1 --out session.fcap --duration 30
 fieldreplay-engine record --mqtt 192.168.1.10:1883 --topic factory/# --mqtt-user field --mqtt-password secret --out session.fcap
+fieldreplay-engine record --mqtt 192.168.1.10:8883 --topic factory/# --mqtt-tls --mqtt-ca C:\certs\ca.pem --mqtt-tls-server-name mqtt.factory.local --out session.fcap
 
 REM 按时间轴重放
 fieldreplay-engine replay --in session.fcap --target 127.0.0.1:9001
 fieldreplay-engine replay --in session.fcap --port COM4 --baud 115200
 REM TCP：按文件内录制角色自动取反；--tcp 为重放侧地址
 fieldreplay-engine replay --in session.fcap --tcp 127.0.0.1:9001
-REM MQTT：按时间轴发布；可选 topic 前缀 / 凭据
+REM MQTT：按时间轴发布；可选 topic 前缀 / 凭据 / TLS
 fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883
 fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix lab/
 fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:1883 --mqtt-user field --mqtt-password secret
+fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:8883 --mqtt-tls --mqtt-ca C:\certs\ca.pem
 ```
 
 ## 模块
@@ -62,7 +64,7 @@ fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:1883 --mqtt-user
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
 | `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；打开失败可读摘要；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
 | `tcp` | 角色 server/client；连接事件 + 字节流 |
-| `mqtt` | 最小 MQTT 3.1.1 客户端（可选 username/password）；自检迷你 Broker |
+| `mqtt` | 最小 MQTT 3.1.1 客户端（可选 username/password、TLS/自定义 CA）；自检迷你 Broker |
 | `record` / `replay` | UDP / 串口 / TCP / MQTT 会话闭环 |
 | `io_accept` | MVP 真实 IO 端到端验收（挂入 self-check） |
 | `control` | 本机 WebSocket 控制面（session.* / record.* / replay.* / serial.list）+ 可选 HTTP 静态 UI |
@@ -81,4 +83,4 @@ cargo run -- self-check
 
 实口/虚口手测步骤见 [`../docs/requirements/20261030-serial-enhance.md`](../docs/requirements/20261030-serial-enhance.md)（一端灌、一端录；重放写对端口）。  
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
-MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a 支持 `--mqtt-user` / `--mqtt-password`（控制面/UI 同字段）；TLS 见 E9b（`docs/requirements/20261030-mqtt-auth.md`）。
+MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。

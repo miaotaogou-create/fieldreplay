@@ -58,6 +58,11 @@ export function replayConfigToEngine(
       };
       if (cfg.mqtt.username) config.username = cfg.mqtt.username;
       if (cfg.mqtt.password) config.password = cfg.mqtt.password;
+      if (cfg.mqtt.tls) {
+        config.tls = true;
+        if (cfg.mqtt.caCertPath) config.ca_cert_path = cfg.mqtt.caCertPath;
+        if (cfg.mqtt.tlsServerName) config.tls_server_name = cfg.mqtt.tlsServerName;
+      }
       return {
         type: 'mqtt',
         config,

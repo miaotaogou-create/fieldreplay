@@ -131,15 +131,18 @@
 ```json
 {
   "broker": "192.168.1.10",
-  "port": 1883,
+  "port": 8883,
   "topic": "factory/line3/#",
   "qos": 0,
   "username": "field",
-  "password": "secret"
+  "password": "secret",
+  "tls": true,
+  "ca_cert_path": "C:/certs/factory-ca.pem",
+  "tls_server_name": "mqtt.factory.local"
 }
 ```
 
-`username` / `password` 可选（E9a）。缺省时 CONNECT 不带鉴权字段，兼容旧会话。密码属敏感信息，会话文件须按现场规范保管。
+`username` / `password` 可选（E9a）。`tls` / `ca_cert_path` / `tls_server_name` 可选（E9b）；`tls` 缺省 `false`。缺省时 CONNECT 走明文且不带鉴权字段，兼容旧会话。密码与 CA 路径属敏感信息，会话文件须按现场规范保管。
 
 **视频（E7a：RTP/UDP；E7c：RTSP）**
 

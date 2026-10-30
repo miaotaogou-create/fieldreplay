@@ -121,6 +121,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       topicPrefix: '',
       username: '',
       password: '',
+      tls: false,
+      caCertPath: '',
+      tlsServerName: '',
       connectedToBroker: true,
     },
     simulateOutput: true,
@@ -1051,6 +1054,65 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                     className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
                   />
                 </div>
+
+                <label className="flex items-center gap-2 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={replayConfig.mqtt.tls}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        mqtt: {
+                          ...replayConfig.mqtt,
+                          tls: e.target.checked,
+                          brokerPort: e.target.checked
+                            ? replayConfig.mqtt.brokerPort === 1883
+                              ? 8883
+                              : replayConfig.mqtt.brokerPort
+                            : replayConfig.mqtt.brokerPort === 8883
+                              ? 1883
+                              : replayConfig.mqtt.brokerPort,
+                        },
+                      })
+                    }
+                  />
+                  TLS（mqtts）
+                </label>
+
+                {replayConfig.mqtt.tls && (
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600 text-[11px] shrink-0">CA PEM:</span>
+                      <input
+                        type="text"
+                        value={replayConfig.mqtt.caCertPath}
+                        onChange={(e) =>
+                          setReplayConfig({
+                            ...replayConfig,
+                            mqtt: { ...replayConfig.mqtt, caCertPath: e.target.value },
+                          })
+                        }
+                        placeholder="可选；空=系统根"
+                        className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-600 text-[11px] shrink-0">SNI:</span>
+                      <input
+                        type="text"
+                        value={replayConfig.mqtt.tlsServerName}
+                        onChange={(e) =>
+                          setReplayConfig({
+                            ...replayConfig,
+                            mqtt: { ...replayConfig.mqtt, tlsServerName: e.target.value },
+                          })
+                        }
+                        placeholder="可选；默认用 Broker 主机"
+                        className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

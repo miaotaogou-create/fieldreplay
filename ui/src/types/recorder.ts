@@ -29,6 +29,10 @@ export interface ChannelConfig {
     mqttQoS?: 0 | 1 | 2;
     mqttUsername?: string;
     mqttPassword?: string;
+    /** E9b：mqtts */
+    mqttTls?: boolean;
+    mqttCaCertPath?: string;
+    mqttTlsServerName?: string;
   };
   // Status
   connected: boolean;
@@ -117,6 +121,12 @@ export interface ReplayConfig {
     username: string;
     /** E9a：可选 CONNECT 密码 */
     password: string;
+    /** E9b：TLS（mqtts） */
+    tls: boolean;
+    /** E9b：自定义 CA PEM 路径 */
+    caCertPath: string;
+    /** E9b：SNI / 证书校验名 */
+    tlsServerName: string;
     connectedToBroker: boolean;
   };
   simulateOutput: boolean; // True to physically send via WebSockets / local agent
