@@ -67,6 +67,18 @@ pub fn extract_u64(json: &str, key: &str) -> Option<u64> {
     after[..end].parse().ok()
 }
 
+/// 抽取 JSON 布尔字段。
+pub fn extract_bool(json: &str, key: &str) -> Option<bool> {
+    let after = after_key(json, key)?;
+    if after.starts_with("true") {
+        Some(true)
+    } else if after.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// 抽取 JSON 浮点/整数字段（如倍速 `speed`）。
 pub fn extract_f64(json: &str, key: &str) -> Option<f64> {
     let after = after_key(json, key)?;

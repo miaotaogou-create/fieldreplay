@@ -27,8 +27,9 @@ pub use record::{
     MqttRecordOptions, OnPacket, RecordOptions, SerialRecordOptions, TcpRecordOptions,
 };
 pub use replay::{
-    replay_mqtt_from_file, replay_serial_from_file, replay_serial_with_port, replay_tcp_from_file,
-    replay_udp_from_file, MqttReplayOptions, ReplayOptions, SerialReplayOptions, TcpReplayOptions,
+    apply_fault, replay_mqtt_from_file, replay_serial_from_file, replay_serial_with_port,
+    replay_tcp_from_file, replay_udp_from_file, FaultInjection, FaultRng, MqttReplayOptions,
+    ReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
 pub use serial::{Parity, SerialConfig, SerialPort};
 pub use tcp::{TcpConfig, TcpRole};

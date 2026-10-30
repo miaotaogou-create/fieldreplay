@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::mqtt::MqttConfig;
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
-    replay_udp_from_file_with, MqttReplayOptions, OnReplayProgress, ReplayOptions,
+    replay_udp_from_file_with, FaultInjection, MqttReplayOptions, OnReplayProgress, ReplayOptions,
     SerialReplayOptions, TcpReplayOptions,
 };
 use crate::serial::{Parity, SerialConfig, SerialPort};
@@ -20,7 +20,8 @@ use super::hub::PushHub;
 use crate::clock::SessionClock;
 
 use super::json_util::{
-    err_result, escape_str, extract_f64, extract_object, extract_str, extract_u64, ok_result,
+    err_result, escape_str, extract_bool, extract_f64, extract_object, extract_str, extract_u64,
+    ok_result,
 };
 use super::session_file::write_loaded_session;
 use super::state::{ActiveReplay, ControlState, LoadedSession};
@@ -57,6 +58,7 @@ pub fn handle_replay_start(
     let from_us = extract_u64(msg, "fromUs")
         .or_else(|| extract_u64(msg, "from_us"))
         .unwrap_or(0);
+    let fault = parse_fault(msg);
 
     let (in_path, duration_us) = {
         let session = state.session.as_ref().unwrap();
@@ -99,6 +101,7 @@ pub fn handle_replay_start(
             duration_us,
             speed,
             from_us,
+            fault,
             &stop_c,
             &paused_c,
             &seek_c,
@@ -130,12 +133,19 @@ pub fn handle_replay_start(
     ok_result(
         id,
         &format!(
-            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us}}}",
+            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us},\"fault\":{{\"enabled\":{},\"lossRatePercent\":{},\"corruptCrc\":{}}}}}",
             escape_str(&ty),
             if config_raw.trim().is_empty() {
                 "{}"
             } else {
                 config_raw.as_str()
+            },
+            if fault.enabled { "true" } else { "false" },
+            fault.loss_rate_percent,
+            if fault.corrupt_payload {
+                "true"
+            } else {
+                "false"
             }
         ),
     )
@@ -256,6 +266,7 @@ fn run_replay(
     duration_us: u64,
     speed: f64,
     from_us: u64,
+    fault: FaultInjection,
     stop: &AtomicBool,
     paused: &AtomicBool,
     seek_us: &AtomicU64,
@@ -272,6 +283,7 @@ fn run_replay(
     };
     let mut on: OnReplayProgress<'_> = Some(&mut hook);
     let poll = Duration::from_millis(200);
+    let fault = fault.clamped();
 
     match ty {
         "udp" => {
@@ -281,6 +293,7 @@ fn run_replay(
                 target,
                 local_bind: "0.0.0.0:0".parse().unwrap(),
                 speed,
+                fault,
             };
             replay_udp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
@@ -290,6 +303,7 @@ fn run_replay(
                 in_path: in_path.to_path_buf(),
                 config: cfg,
                 speed,
+                fault,
             };
             let port = SerialPort::open(&opts.config, poll)?;
             replay_serial_with_port_with(&opts, &port, stop, paused, seek_us, from_us, &mut on)
@@ -301,6 +315,7 @@ fn run_replay(
                 endpoint,
                 poll_timeout: poll,
                 speed,
+                fault,
             };
             replay_tcp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
@@ -320,6 +335,7 @@ fn run_replay(
                 qos_override: None,
                 poll_timeout: poll,
                 speed,
+                fault,
             };
             replay_mqtt_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
@@ -328,6 +344,36 @@ fn run_replay(
             format!("不支持的重放类型: {other}"),
         )),
     }
+}
+
+/// 解析 `fault` 对象或顶层 `lossRatePercent` / `corruptCrc`。
+fn parse_fault(msg: &str) -> FaultInjection {
+    let src = extract_object(msg, "fault").unwrap_or_else(|| msg.to_string());
+    let enabled = extract_bool(&src, "enabled").unwrap_or_else(|| {
+        // 无 enabled 时：有丢包率或篡改开关即视为启用
+        extract_u64(&src, "lossRatePercent")
+            .or_else(|| extract_u64(&src, "loss_rate_percent"))
+            .map(|v| v > 0)
+            .unwrap_or(false)
+            || extract_bool(&src, "corruptCrc")
+                .or_else(|| extract_bool(&src, "corrupt_crc"))
+                .or_else(|| extract_bool(&src, "corruptPayload"))
+                .unwrap_or(false)
+    });
+    let loss = extract_u64(&src, "lossRatePercent")
+        .or_else(|| extract_u64(&src, "loss_rate_percent"))
+        .unwrap_or(0)
+        .min(100) as u8;
+    let corrupt = extract_bool(&src, "corruptCrc")
+        .or_else(|| extract_bool(&src, "corrupt_crc"))
+        .or_else(|| extract_bool(&src, "corruptPayload"))
+        .unwrap_or(false);
+    FaultInjection {
+        enabled,
+        loss_rate_percent: loss,
+        corrupt_payload: corrupt,
+    }
+    .clamped()
 }
 
 fn parse_udp_target(config: &str) -> io::Result<SocketAddr> {

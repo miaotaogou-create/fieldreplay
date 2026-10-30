@@ -237,17 +237,33 @@ export default function App() {
     setEngineReplayTick(null);
     const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
     const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
+    const faultCfg = cfg.faultInjection;
+    const fault =
+      faultCfg?.enabled
+        ? {
+            enabled: true,
+            lossRatePercent: Math.max(0, Math.min(100, Math.floor(faultCfg.lossRatePercent || 0))),
+            corruptCrc: !!faultCfg.corruptCrc,
+          }
+        : undefined;
     await engine.startReplay({
       type: mapped.type,
       config: mapped.config,
       topicPrefix: mapped.topicPrefix,
       speed,
       fromUs: startUs,
+      fault,
     });
+    const faultHint =
+      fault && (fault.lossRatePercent > 0 || fault.corruptCrc)
+        ? ` · 故障注入${fault.lossRatePercent > 0 ? ` 丢包${fault.lossRatePercent}%` : ''}${
+            fault.corruptCrc ? ' 篡改' : ''
+          }`
+        : '';
     showToast(
       speed === 1
-        ? `已开始引擎重放：${mapped.type}`
-        : `已开始引擎重放：${mapped.type}（${speed}x）`
+        ? `已开始引擎重放：${mapped.type}${faultHint}`
+        : `已开始引擎重放：${mapped.type}（${speed}x）${faultHint}`
     );
   };
 

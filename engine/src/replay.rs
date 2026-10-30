@@ -1,10 +1,11 @@
 //! 按 `relative_us` 将数据帧发往目标（UDP / 串口 / TCP / MQTT）。
 
+use std::borrow::Cow;
 use std::io;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::clock::{SessionClock, WaitResult};
 use crate::fcap::{ChannelType, PacketKind, SessionReader};
@@ -18,6 +19,131 @@ use crate::udp::{bind_sender, send_to};
 /// 每发出一帧数据后的进度回调（`sent` 为已发数据帧数，`relative_us` 为该帧时戳）。
 pub type OnReplayProgress<'a> = Option<&'a mut dyn FnMut(u64, u64)>;
 
+/// 重放故障注入：随机丢包 / 篡改载荷（不解析业务 CRC，只扰动原始字节）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FaultInjection {
+    pub enabled: bool,
+    /// 0..=100；启用后按该概率丢弃本帧（不发线上）。
+    pub loss_rate_percent: u8,
+    /// 启用后约 20% 概率篡改载荷字节后再发出。
+    pub corrupt_payload: bool,
+}
+
+impl FaultInjection {
+    pub const OFF: Self = Self {
+        enabled: false,
+        loss_rate_percent: 0,
+        corrupt_payload: false,
+    };
+
+    pub fn is_active(self) -> bool {
+        self.enabled && (self.loss_rate_percent > 0 || self.corrupt_payload)
+    }
+
+    pub fn clamped(self) -> Self {
+        Self {
+            enabled: self.enabled,
+            loss_rate_percent: self.loss_rate_percent.min(100),
+            corrupt_payload: self.corrupt_payload,
+        }
+    }
+}
+
+impl Default for FaultInjection {
+    fn default() -> Self {
+        Self::OFF
+    }
+}
+
+/// 简易 LCG（仅 std；自检可固定种子）。
+pub struct FaultRng(u64);
+
+impl FaultRng {
+    pub fn new() -> Self {
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E3779B97F4A7C15);
+        Self::seeded(seed)
+    }
+
+    pub fn seeded(seed: u64) -> Self {
+        Self(seed | 1)
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
+        (self.0 >> 32) as u32
+    }
+
+    fn roll_percent(&mut self, percent: u32) -> bool {
+        if percent == 0 {
+            return false;
+        }
+        if percent >= 100 {
+            return true;
+        }
+        self.next_u32() % 100 < percent
+    }
+}
+
+/// `None` = 丢弃；`Some` = 发出（可能已篡改）。
+pub fn apply_fault<'a>(
+    payload: &'a [u8],
+    fault: &FaultInjection,
+    rng: &mut FaultRng,
+) -> Option<Cow<'a, [u8]>> {
+    let fault = fault.clamped();
+    if !fault.enabled {
+        return Some(Cow::Borrowed(payload));
+    }
+    if rng.roll_percent(u32::from(fault.loss_rate_percent)) {
+        return None;
+    }
+    if fault.corrupt_payload && rng.roll_percent(20) {
+        let mut buf = payload.to_vec();
+        if !buf.is_empty() {
+            let i = (rng.next_u32() as usize) % buf.len();
+            buf[i] ^= 0xA5;
+            let last = buf.len() - 1;
+            buf[last] = buf[last].wrapping_add(1);
+        }
+        return Some(Cow::Owned(buf));
+    }
+    Some(Cow::Borrowed(payload))
+}
+
+fn emit_with_fault(
+    payload: &[u8],
+    fault: &FaultInjection,
+    rng: &mut FaultRng,
+    relative_us: u64,
+    sent: &mut u64,
+    on_progress: &mut OnReplayProgress<'_>,
+    mut send: impl FnMut(&[u8]) -> io::Result<()>,
+) -> io::Result<()> {
+    match apply_fault(payload, fault, rng) {
+        None => {
+            // 丢包仍推进时间轴进度，便于 UI scrub；sent 不计
+            if let Some(cb) = on_progress.as_mut() {
+                cb(*sent, relative_us);
+            }
+            Ok(())
+        }
+        Some(bytes) => {
+            send(bytes.as_ref())?;
+            *sent += 1;
+            if let Some(cb) = on_progress.as_mut() {
+                cb(*sent, relative_us);
+            }
+            Ok(())
+        }
+    }
+}
+
 pub struct ReplayOptions {
     pub in_path: std::path::PathBuf,
     pub target: SocketAddr,
@@ -25,6 +151,7 @@ pub struct ReplayOptions {
     pub local_bind: SocketAddr,
     /// 墙钟倍速；1.0=实时。非法值按 1.0。
     pub speed: f64,
+    pub fault: FaultInjection,
 }
 
 pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
@@ -67,12 +194,15 @@ pub fn replay_udp_from_file_with(
         SessionClock::rebase_timeline(&mut base, from_us, speed);
     }
     let mut sent = 0u64;
+    let mut rng = FaultRng::new();
+    let fault = opts.fault.clamped();
 
     eprintln!(
-        "重放中：{} → {}（按 relative_us，{}x，fromUs={from_us}）",
+        "重放中：{} → {}（按 relative_us，{}x，fromUs={from_us}{}）",
         opts.in_path.display(),
         opts.target,
-        speed
+        speed,
+        if fault.is_active() { "，故障注入" } else { "" }
     );
 
     reader.rewind_packets()?;
@@ -115,11 +245,15 @@ pub fn replay_udp_from_file_with(
             WaitResult::Seek => continue,
             WaitResult::Ready => {}
         }
-        send_to(&sock, &pkt.payload, opts.target)?;
-        sent += 1;
-        if let Some(cb) = on_progress.as_mut() {
-            cb(sent, pkt.relative_us);
-        }
+        emit_with_fault(
+            &pkt.payload,
+            &fault,
+            &mut rng,
+            pkt.relative_us,
+            &mut sent,
+            on_progress,
+            |bytes| send_to(&sock, bytes, opts.target).map(|_| ()),
+        )?;
     }
 
     eprintln!("重放结束：发送 {sent} 帧");
@@ -151,6 +285,7 @@ pub fn replay_udp_path(
         target,
         local_bind: "0.0.0.0:0".parse().unwrap(),
         speed: 1.0,
+        fault: FaultInjection::OFF,
     };
     replay_udp_from_file(&opts)
 }
@@ -160,6 +295,7 @@ pub struct SerialReplayOptions {
     pub config: SerialConfig,
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
+    pub fault: FaultInjection,
 }
 
 pub fn replay_serial_from_file(opts: &SerialReplayOptions) -> io::Result<u64> {
@@ -217,12 +353,15 @@ pub fn replay_serial_with_port_with(
         SessionClock::rebase_timeline(&mut base, from_us, speed);
     }
     let mut sent = 0u64;
+    let mut rng = FaultRng::new();
+    let fault = opts.fault.clamped();
 
     eprintln!(
-        "重放中：{} → 串口 {}（按 relative_us，{}x，fromUs={from_us}）",
+        "重放中：{} → 串口 {}（按 relative_us，{}x，fromUs={from_us}{}）",
         opts.in_path.display(),
         opts.config.port_name,
-        speed
+        speed,
+        if fault.is_active() { "，故障注入" } else { "" }
     );
 
     reader.rewind_packets()?;
@@ -265,11 +404,15 @@ pub fn replay_serial_with_port_with(
             WaitResult::Seek => continue,
             WaitResult::Ready => {}
         }
-        port.write_all(&pkt.payload)?;
-        sent += 1;
-        if let Some(cb) = on_progress.as_mut() {
-            cb(sent, pkt.relative_us);
-        }
+        emit_with_fault(
+            &pkt.payload,
+            &fault,
+            &mut rng,
+            pkt.relative_us,
+            &mut sent,
+            on_progress,
+            |bytes| port.write_all(bytes),
+        )?;
     }
 
     eprintln!("重放结束：发送 {sent} 帧");
@@ -283,6 +426,7 @@ pub struct TcpReplayOptions {
     pub poll_timeout: Duration,
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
+    pub fault: FaultInjection,
 }
 
 /// 按会话内录制角色取反后建立连接，并把录到的 RX 数据按时间轴写回对端。
@@ -320,13 +464,15 @@ pub fn replay_tcp_from_file_with(
     let play_role = recorded_cfg.role.invert();
 
     let speed = SessionClock::clamp_speed(opts.speed);
+    let fault = opts.fault.clamped();
     eprintln!(
-        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us，{}x，fromUs={from_us}）",
+        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us，{}x，fromUs={from_us}{}）",
         opts.in_path.display(),
         play_role.as_str(),
         opts.endpoint,
         recorded_cfg.role.as_str(),
-        speed
+        speed,
+        if fault.is_active() { "，故障注入" } else { "" }
     );
 
     let mut base = Instant::now();
@@ -335,6 +481,7 @@ pub fn replay_tcp_from_file_with(
         SessionClock::rebase_timeline(&mut base, from_us, speed);
     }
     let mut sent = 0u64;
+    let mut rng = FaultRng::new();
     let mut stream = None;
 
     reader.rewind_packets()?;
@@ -432,11 +579,15 @@ pub fn replay_tcp_from_file_with(
                     eprintln!("警告：未连接就遇到数据帧，已跳过");
                     continue;
                 };
-                write_all(s, &pkt.payload)?;
-                sent += 1;
-                if let Some(cb) = on_progress.as_mut() {
-                    cb(sent, pkt.relative_us);
-                }
+                emit_with_fault(
+                    &pkt.payload,
+                    &fault,
+                    &mut rng,
+                    pkt.relative_us,
+                    &mut sent,
+                    on_progress,
+                    |bytes| write_all(s, bytes),
+                )?;
             }
             PacketKind::TcpDisconnect => {
                 stream = None;
@@ -460,6 +611,7 @@ pub struct MqttReplayOptions {
     pub poll_timeout: Duration,
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
+    pub fault: FaultInjection,
 }
 
 /// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
@@ -501,13 +653,15 @@ pub fn replay_mqtt_from_file_with(
     );
 
     let speed = SessionClock::clamp_speed(opts.speed);
+    let fault = opts.fault.clamped();
     eprintln!(
-        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us，{}x，fromUs={from_us}）",
+        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us，{}x，fromUs={from_us}{}）",
         opts.in_path.display(),
         config.broker,
         config.port,
         opts.topic_prefix,
-        speed
+        speed,
+        if fault.is_active() { "，故障注入" } else { "" }
     );
 
     let mut client = MqttClient::connect(&config, opts.poll_timeout)?;
@@ -517,6 +671,7 @@ pub fn replay_mqtt_from_file_with(
         SessionClock::rebase_timeline(&mut base, from_us, speed);
     }
     let mut sent = 0u64;
+    let mut rng = FaultRng::new();
 
     reader.rewind_packets()?;
     loop {
@@ -565,14 +720,62 @@ pub fn replay_mqtt_from_file_with(
             WaitResult::Seek => continue,
             WaitResult::Ready => {}
         }
-        client.publish(&topic, &pkt.payload, qos, retain)?;
-        sent += 1;
-        if let Some(cb) = on_progress.as_mut() {
-            cb(sent, pkt.relative_us);
-        }
+        emit_with_fault(
+            &pkt.payload,
+            &fault,
+            &mut rng,
+            pkt.relative_us,
+            &mut sent,
+            on_progress,
+            |bytes| client.publish(&topic, bytes, qos, retain),
+        )?;
     }
 
     let _ = client.disconnect();
     eprintln!("重放结束：发布 {sent} 帧");
     Ok(sent)
+}
+
+#[cfg(test)]
+mod fault_tests {
+    use super::*;
+
+    #[test]
+    fn loss_100_always_drops() {
+        let fault = FaultInjection {
+            enabled: true,
+            loss_rate_percent: 100,
+            corrupt_payload: false,
+        };
+        let mut rng = FaultRng::seeded(42);
+        for _ in 0..32 {
+            assert!(apply_fault(b"abc", &fault, &mut rng).is_none());
+        }
+    }
+
+    #[test]
+    fn off_keeps_payload() {
+        let mut rng = FaultRng::seeded(1);
+        let out = apply_fault(b"hi", &FaultInjection::OFF, &mut rng).unwrap();
+        assert_eq!(out.as_ref(), b"hi");
+    }
+
+    #[test]
+    fn corrupt_may_mutate() {
+        let fault = FaultInjection {
+            enabled: true,
+            loss_rate_percent: 0,
+            corrupt_payload: true,
+        };
+        let mut rng = FaultRng::seeded(7);
+        let mut saw_corrupt = false;
+        for _ in 0..200 {
+            if let Some(Cow::Owned(buf)) = apply_fault(b"ABCDEFGH", &fault, &mut rng) {
+                assert_ne!(buf, b"ABCDEFGH");
+                saw_corrupt = true;
+                break;
+            }
+        }
+        assert!(saw_corrupt, "固定种子下应至少一次篡改");
+    }
 }

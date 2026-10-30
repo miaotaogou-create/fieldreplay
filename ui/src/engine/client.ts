@@ -198,6 +198,12 @@ export class EngineClient {
     speed?: number;
     /** 从该相对微秒起播（跳过更早数据帧） */
     fromUs?: number;
+    /** 引擎侧故障注入（丢包 / 篡改载荷） */
+    fault?: {
+      enabled: boolean;
+      lossRatePercent?: number;
+      corruptCrc?: boolean;
+    };
   }): Promise<EngineReplayStartResult> {
     return this.request<EngineReplayStartResult>('replay.start', args);
   }

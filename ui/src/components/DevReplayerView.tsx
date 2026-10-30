@@ -1137,6 +1137,11 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               <span className="text-xs font-medium text-slate-700">启用</span>
             </label>
           </div>
+          {useEngineReplay && (
+            <p className="text-[10px] text-slate-500 leading-snug">
+              引擎已连：丢包/篡改在发送热路径生效（不解析业务 CRC，只扰动原始载荷）。
+            </p>
+          )}
 
           <div
             className={`space-y-2 text-xs transition-opacity ${

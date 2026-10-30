@@ -15,8 +15,8 @@ use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file,
     serve_control, MiniBroker, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity,
-    RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions,
-    TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
+    FaultInjection, RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions,
+    SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
 };
 
 fn main() {
@@ -427,6 +427,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             target,
             local_bind: "0.0.0.0:0".parse().unwrap(),
             speed: 1.0,
+            fault: FaultInjection::OFF,
         };
         let n = replay_udp_from_file(&opts)?;
         println!("ok sent={n}");
@@ -440,6 +441,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             endpoint,
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
+            fault: FaultInjection::OFF,
         };
         let n = replay_tcp_from_file(&opts, &stop)?;
         println!("ok sent={n}");
@@ -454,6 +456,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             qos_override: None,
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
+            fault: FaultInjection::OFF,
         };
         let n = replay_mqtt_from_file(&opts)?;
         println!("ok sent={n}");
@@ -472,7 +475,8 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         in_path: input,
         config,
         speed: 1.0,
-        };
+        fault: FaultInjection::OFF,
+    };
     let n = fieldreplay_engine::replay_serial_from_file(&opts)?;
     println!("ok sent={n}");
     Ok(())
@@ -676,7 +680,8 @@ fn udp_loopback_check() -> io::Result<()> {
         target: recv_addr,
         local_bind: "127.0.0.1:0".parse().unwrap(),
         speed: 1.0,
-})?;
+        fault: FaultInjection::OFF,
+    })?;
     let got = listener.join().map_err(|_| err_arg("接收线程 panic"))??;
     let _ = std::fs::remove_file(&fcap);
 
@@ -756,7 +761,8 @@ fn serial_loopback_check() -> io::Result<()> {
             in_path: fcap.clone(),
             config: SerialConfig::new("LOOP-B", 115_200),
             speed: 1.0,
-},
+            fault: FaultInjection::OFF,
+        },
         &end_play,
     )?;
     let got = listener
@@ -864,7 +870,8 @@ fn tcp_server_record_loopback() -> io::Result<()> {
             endpoint: play_addr,
             poll_timeout: Duration::from_millis(50),
             speed: 1.0,
-},
+            fault: FaultInjection::OFF,
+        },
         &stop_play,
     )?;
     let got = acceptor
@@ -952,7 +959,8 @@ fn tcp_client_record_loopback() -> io::Result<()> {
                 endpoint: play_addr,
                 poll_timeout: Duration::from_millis(50),
                 speed: 1.0,
-},
+                fault: FaultInjection::OFF,
+            },
             &stop_play,
         )
     });
@@ -1080,7 +1088,8 @@ fn mqtt_loopback_check() -> io::Result<()> {
         qos_override: Some(0),
         poll_timeout: Duration::from_millis(50),
         speed: 1.0,
-})?;
+        fault: FaultInjection::OFF,
+    })?;
     listen_stop.store(true, Ordering::SeqCst);
     let got = collector
         .join()

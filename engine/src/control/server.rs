@@ -434,6 +434,7 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_replay_via_ws(&mut client, &path)?;
     self_check_replay_pause_via_ws(&mut client, &path)?;
     self_check_replay_seek_via_ws(&mut client, &path)?;
+    self_check_replay_fault_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
@@ -850,6 +851,93 @@ fn self_check_replay_seek_via_ws(client: &mut TcpStream, session_path: &Path) ->
     }
 
     eprintln!("  控制面 replay.seek：通过");
+    Ok(())
+}
+
+/// 验证 `replay.start.fault`：100% 丢包时线上应收不到 UDP。
+fn self_check_replay_fault_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let recv = UdpSocket::bind("127.0.0.1:0")?;
+    recv.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let target = recv.local_addr()?;
+
+    let open = format!(
+        r#"{{"id":"f0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "fault 自检未收到 session.open")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("fault 自检 session.open 失败: {opened}"),
+        ));
+    }
+
+    let start = format!(
+        r#"{{"id":"f1","cmd":"replay.start","type":"udp","speed":10,"fault":{{"enabled":true,"lossRatePercent":100,"corruptCrc":false}},"config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        target.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "fault 自检未收到 replay.start")
+    })?;
+    if !started.contains("\"ok\":true") || !started.contains("\"started\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("fault 自检 replay.start 失败: {started}"),
+        ));
+    }
+    if !started.contains("\"lossRatePercent\":100") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("fault 自检未回显丢包率: {started}"),
+        ));
+    }
+
+    let mut got = 0u32;
+    let mut saw_done = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    client.set_read_timeout(Some(Duration::from_millis(150)))?;
+    while std::time::Instant::now() < deadline && !saw_done {
+        let mut buf = [0u8; 256];
+        match recv.recv_from(&mut buf) {
+            Ok((n, _)) if n > 0 => got += 1,
+            Ok(_) => {}
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"replay.done\"") {
+                    saw_done = true;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    if !saw_done {
+        write_text_frame_client(client, r#"{"id":"f2","cmd":"replay.stop"}"#)?;
+        let _ = drain_until_id(client, "f2")?;
+    }
+
+    if got != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("100% 丢包时期望线上 0 包，实际收到 {got}"),
+        ));
+    }
+
+    eprintln!("  控制面 replay.fault 100% 丢包：通过");
     Ok(())
 }
 
