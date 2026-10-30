@@ -12,3 +12,11 @@ Batch files are **ASCII-only** (cmd breaks on UTF-8 Chinese comments).
 4. Close preview only; keep MediaMTX + push for later recording
 
 Fail checks: port `8554` free; `C:\01_Install\bin\ffplay.exe` exists.
+
+## E2E-2: UDP fake status
+
+1. Run `02_start_udp_send.bat` (keep open) — sends `STAT,...` to `127.0.0.1:56001`
+2. Run `02_run_udp_recv.bat` — should print several `recv #n ... STAT,...` and `PASS`
+3. Tell the guide "UDP OK" when PASS
+
+RTSP windows from E2E-1 can stay open; not required for this step.
