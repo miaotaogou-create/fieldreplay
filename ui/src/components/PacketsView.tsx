@@ -25,7 +25,7 @@ const TYPE_LABEL: Record<ChannelType, string> = {
   udp: 'UDP',
   tcp: 'TCP',
   mqtt: 'MQTT',
-  video_stream: '视频',
+  video_stream: '视频 RTP',
 };
 
 const TYPE_BADGE: Record<ChannelType, string> = {
@@ -143,6 +143,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
     { id: 'udp', label: 'UDP 网络', activeClass: 'bg-white text-slate-900 shadow-xs' },
     { id: 'tcp', label: 'TCP 套接字', activeClass: 'bg-white text-slate-900 shadow-xs' },
     { id: 'mqtt', label: 'MQTT 消息', activeClass: 'bg-white text-teal-700 shadow-xs' },
+    { id: 'video_stream', label: '视频 RTP', activeClass: 'bg-white text-violet-700 shadow-xs' },
   ];
 
   return (
@@ -385,6 +386,12 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                       <span className="text-teal-700">QoS {selectedPacket.mqttQoS}</span>
                     )}
                   </div>
+                </div>
+              )}
+
+              {selectedPacket.channelType === 'video_stream' && (
+                <div className="p-2.5 bg-violet-50/70 border border-violet-100 rounded-lg font-sans text-[11px] text-violet-900">
+                  视频 RTP/UDP 原始数据报；不解 H.264/HEVC。完整 RTSP 信令后置。
                 </div>
               )}
 

@@ -6,7 +6,7 @@
 - **实验室**：按时间轴将录制包灌回真实上位机  
 - **交付**：Windows 单入口客户端（双击 EXE 出窗口，不靠系统浏览器）
 
-当前：**E6 / E8–E13 已收口**；**E7a（视频=RTP/UDP 原始块）已落地**。完整 RTSP（E7c/d）与增强项见 `PROGRESS.md` / `docs/requirements/20261030-video.md`。
+当前：**E6 / E8–E13 已收口**；**E7a+E7b（视频=RTP/UDP + UI 抛光）已落地**。完整 RTSP（E7c/d）与增强项见 `PROGRESS.md` / `docs/requirements/20261030-video.md`。
 
 ## 绿色目录打包（交付形态）
 

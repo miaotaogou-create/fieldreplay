@@ -113,11 +113,26 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
   const [activeTargetTab, setActiveTargetTab] = useState<'udp' | 'serial' | 'tcp' | 'mqtt'>('tcp');
 
+  const sessionIsVideo =
+    packets.some((p) => p.channelType === 'video_stream')
+    || sessionMetadata.channels.some((c) => c.type === 'video_stream');
+
   const [dispatchedPackets, setDispatchedPackets] = useState<
     { id: number; time: string; channel: string; status: 'ok' | 'dropped' | 'corrupted'; bytes: number }[]
   >([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 载入视频会话时切到 UDP/RTP 目标区，默认推送口 5004
+  useEffect(() => {
+    if (!sessionIsVideo) return;
+    setActiveTargetTab('udp');
+    setReplayConfig((prev) =>
+      prev.targetUdpPort === 8080
+        ? { ...prev, targetUdpPort: 5004 }
+        : prev
+    );
+  }, [sessionIsVideo, sessionMetadata.sessionTitle, sessionMetadata.totalPackets]);
   const timerRef = useRef<any>(null);
   const engineBusyRef = useRef(false);
   const hasPackets = packets.length > 0;
@@ -684,11 +699,13 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               onClick={() => setActiveTargetTab('udp')}
               className={`py-1 px-1.5 rounded font-medium transition-colors text-center truncate ${
                 activeTargetTab === 'udp'
-                  ? 'bg-white text-slate-900 shadow-xs'
+                  ? sessionIsVideo
+                    ? 'bg-white text-violet-700 shadow-xs'
+                    : 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              UDP 网络
+              {sessionIsVideo ? '视频 RTP' : 'UDP 网络'}
             </button>
             <button
               onClick={() => setActiveTargetTab('serial')}
@@ -933,12 +950,30 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             </div>
           )}
 
-          {/* Tab 3: UDP Handler */}
+          {/* Tab 3: UDP / 视频 RTP Handler */}
           {activeTargetTab === 'udp' && (
-            <div className="p-2.5 bg-slate-50 rounded-md border border-slate-200/80 space-y-1.5 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-slate-800">UDP 推送目标</span>
+            <div
+              className={`p-2.5 rounded-md border space-y-1.5 text-xs ${
+                sessionIsVideo
+                  ? 'bg-violet-50/70 border-violet-200/80'
+                  : 'bg-slate-50 border-slate-200/80'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-slate-800">
+                  {sessionIsVideo ? '视频 RTP 推送目标' : 'UDP 推送目标'}
+                </span>
+                {sessionIsVideo && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-violet-100 text-violet-800 border border-violet-200 shrink-0">
+                    会话含视频通道
+                  </span>
+                )}
               </div>
+              {sessionIsVideo && (
+                <p className="text-[11px] text-violet-900/80 leading-snug">
+                  按时间轴向目标口发送已录 RTP/UDP 数据报；不解 H.264。完整 RTSP 服务侧重放后置。
+                </p>
+              )}
               <div className="flex items-center gap-2">
                 <span className="text-slate-500">推送到:</span>
                 <input
@@ -956,7 +991,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   onChange={(e) =>
                     setReplayConfig({
                       ...replayConfig,
-                      targetUdpPort: parseInt(e.target.value) || 8080,
+                      targetUdpPort: parseInt(e.target.value) || (sessionIsVideo ? 5004 : 8080),
                     })
                   }
                   className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-20 font-mono text-xs"

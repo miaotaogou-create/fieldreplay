@@ -398,7 +398,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   {chan.type === 'tcp' && `TCP :${chan.params.port ?? 9000} (${chan.params.role ?? 'svr'})`}
                   {chan.type === 'mqtt' && `MQTT ${chan.params.mqttTopic ?? '#'}`}
                   {chan.type === 'video_stream'
-                    && `RTP :${chan.params.port ?? 5004}`}
+                    && `RTP ${chan.params.ip ?? '0.0.0.0'}:${chan.params.port ?? 5004}`}
                 </div>
               </div>
             ))}
@@ -865,7 +865,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   : newChanType === 'mqtt'
                   ? 'Broker 与 Topic'
                   : newChanType === 'video_stream'
-                  ? 'RTP 监听地址（E7a 不解编码）'
+                  ? 'RTP/UDP 监听地址（不解编码；RTSP 后置）'
                   : '监听地址'}
               </label>
               <input

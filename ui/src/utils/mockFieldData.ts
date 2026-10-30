@@ -115,7 +115,7 @@ export const defaultChannels: ChannelConfig[] = [
     params: {
       ip: '0.0.0.0',
       port: 5004,
-      // 备注：E7a 不连 RTSP；完整拉流见 E7c
+      // 可选备注；当前录制不连 RTSP
       streamUrl: 'rtsp://192.168.1.200:554/live/ch0',
       resolution: 'RTP/UDP',
     },
