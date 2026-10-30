@@ -16,7 +16,7 @@ cargo build --release
 ## 命令
 
 ```bat
-REM 写帧往返 + UDP / 串口 / TCP / MQTT 环回
+REM 写帧往返 + UDP/串口/TCP/MQTT 环回 + IO 验收（高速率/间隔）
   fieldreplay-engine self-check
 
 REM 本地控制面（UI 开发预览连 ws://127.0.0.1:17890）
@@ -57,11 +57,12 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix
 |------|------|
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
 | `clock` | 录制相对微秒、重放等待 |
-| `udp` | bind 收 / 发 |
+| `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
 | `serial` | Windows 实口 Win32；自检内存环回 |
 | `tcp` | 角色 server/client；连接事件 + 字节流 |
 | `mqtt` | 最小 MQTT 3.1.1 客户端；自检迷你 Broker |
 | `record` / `replay` | UDP / 串口 / TCP / MQTT 会话闭环 |
+| `io_accept` | MVP 真实 IO 端到端验收（挂入 self-check） |
 | `control` | 本机 WebSocket 控制面（session.* / record.* / replay.*）+ 可选 HTTP 静态 UI |
 | `main` | CLI |
 

@@ -14,9 +14,10 @@ use fieldreplay_engine::fcap::{
 use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file,
-    serve_control, MiniBroker, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity,
-    FaultInjection, RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions,
-    SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
+    run_io_acceptance, serve_control, MiniBroker, MqttClient, MqttConfig, MqttRecordOptions,
+    MqttReplayOptions, Parity, FaultInjection, RecordOptions, ReplayOptions, SerialConfig,
+    SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions,
+    TcpReplayOptions, TcpRole, DEFAULT_BIND,
 };
 
 fn main() {
@@ -608,6 +609,11 @@ fn cmd_self_check() -> io::Result<()> {
     let _ = io::stdout().flush();
     self_check_control()?;
     println!("ok");
+
+    print!("self-check: IO 端到端验收… ");
+    let _ = io::stdout().flush();
+    println!();
+    run_io_acceptance()?;
 
     let _ = std::fs::remove_file(&path);
     println!("self-check 全部通过");

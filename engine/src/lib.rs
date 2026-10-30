@@ -3,6 +3,7 @@
 pub mod clock;
 pub mod control;
 pub mod fcap;
+pub mod io_accept;
 pub mod mqtt;
 pub mod record;
 pub mod replay;
@@ -12,6 +13,7 @@ pub mod udp;
 
 pub use clock::SessionClock;
 pub use control::{serve as serve_control, API_VERSION as CONTROL_API_VERSION, DEFAULT_BIND};
+pub use io_accept::run_io_acceptance;
 pub use fcap::{
     ChannelEntry, ChannelType, FileHeader, PacketKind, PacketRecord, SessionReader, SessionWriter,
     FLAG_FINALIZED, FLAG_HAS_META, FCAP_MAGIC, FCAP_VERSION_V1, HEADER_BYTES,
