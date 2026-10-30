@@ -49,37 +49,17 @@ export function mapEngineSession(dto: EngineSessionDto): {
     color: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
   }));
 
-  const packets: CapturedPacket[] = dto.packets.map((p) => {
-    const ch = channels.find((c) => c.id === `ch_${p.ch}`) ?? {
-      id: `ch_${p.ch}`,
-      name: `通道 ${p.ch}`,
-      type: 'udp' as ChannelType,
-    };
-    const data = base64ToBytes(p.payloadB64 || '');
-    const absMs = dto.startWallUnixUs
-      ? Math.floor(dto.startWallUnixUs / 1000) + Math.floor(p.us / 1000)
-      : Date.now();
-    const pkt: CapturedPacket = {
-      id: p.i + 1,
-      timestampUs: p.us,
-      absoluteTime: new Date(absMs).toISOString(),
-      channelId: ch.id,
-      channelName: ch.name,
-      channelType: ch.type,
-      direction: p.dir === 1 ? 'TX' : 'RX',
-      length: data.length,
-      data,
-      hexPreview: bytesToHex(data),
-      asciiPreview: bytesToAscii(data),
-      hasError: p.kind === 3,
-    };
-    if (ch.type === 'mqtt') {
-      pkt.mqttTopic = p.topic || undefined;
-      pkt.mqttQoS = p.qos;
-      pkt.protocolHint = 'MQTT-Message';
-    }
-    return pkt;
-  });
+  const packets: CapturedPacket[] = dto.packets.map((p) =>
+    mapEnginePacket(
+      p,
+      channels.find((c) => c.id === `ch_${p.ch}`) ?? {
+        id: `ch_${p.ch}`,
+        name: `通道 ${p.ch}`,
+        type: 'udp' as ChannelType,
+      },
+      dto.startWallUnixUs
+    )
+  );
 
   const meta = dto.meta && typeof dto.meta === 'object' ? dto.meta : {};
   const title =
@@ -115,16 +95,31 @@ export function mapEngineSession(dto: EngineSessionDto): {
   return { metadata, packets };
 }
 
+/** `.fcap` PacketKind::Marker = 3 */
+const KIND_MARKER = 3;
+
+function decodeAuxText(auxB64: string | undefined): string {
+  if (!auxB64) return '';
+  try {
+    const bytes = base64ToBytes(auxB64);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return '';
+  }
+}
+
 /** 将引擎推送的单帧映射为 UI 报文（E5b 预览）。 */
 export function mapEnginePacket(
   p: EnginePacketDto,
   channel: { id: string; name: string; type: ChannelType },
   startWallUnixUs = 0
 ): CapturedPacket {
+  const isMarker = p.kind === KIND_MARKER;
   const data = base64ToBytes(p.payloadB64 || '');
   const absMs = startWallUnixUs
     ? Math.floor(startWallUnixUs / 1000) + Math.floor(p.us / 1000)
     : Date.now();
+  const markerText = isMarker ? decodeAuxText(p.auxB64) : undefined;
   const pkt: CapturedPacket = {
     id: p.i + 1,
     timestampUs: p.us,
@@ -135,11 +130,18 @@ export function mapEnginePacket(
     direction: p.dir === 1 ? 'TX' : 'RX',
     length: data.length,
     data,
-    hexPreview: bytesToHex(data),
-    asciiPreview: bytesToAscii(data),
-    hasError: p.kind === 3,
+    hexPreview: isMarker
+      ? markerText
+        ? `[标记] ${markerText}`
+        : '[标记]'
+      : bytesToHex(data),
+    asciiPreview: isMarker ? markerText || '' : bytesToAscii(data),
+    isMarker,
+    markerText,
+    // kind=3 是 marker，不是故障帧（故障由 mock / 注入另标 hasError）
+    hasError: false,
   };
-  if (channel.type === 'mqtt') {
+  if (!isMarker && channel.type === 'mqtt') {
     pkt.mqttTopic = p.topic || undefined;
     pkt.mqttQoS = p.qos;
     pkt.protocolHint = 'MQTT-Message';

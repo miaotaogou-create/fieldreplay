@@ -59,6 +59,10 @@ export interface CapturedPacket {
   errorReason?: string;
   mqttTopic?: string;
   mqttQoS?: number;
+  /** `.fcap` kind=marker；重放不发 sink */
+  isMarker?: boolean;
+  /** marker 的 aux 说明文本 */
+  markerText?: string;
 }
 
 export interface CaptureSessionMetadata {

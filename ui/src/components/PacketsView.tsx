@@ -57,7 +57,9 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
           p.asciiPreview.toLowerCase().includes(q) ||
           p.channelName.toLowerCase().includes(q) ||
           (p.protocolHint && p.protocolHint.toLowerCase().includes(q)) ||
-          (p.mqttTopic && p.mqttTopic.toLowerCase().includes(q))
+          (p.mqttTopic && p.mqttTopic.toLowerCase().includes(q)) ||
+          (p.isMarker && (p.markerText || '').toLowerCase().includes(q)) ||
+          (p.isMarker && 'marker'.includes(q))
         );
       }
       return true;
@@ -253,8 +255,9 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
             ) : (
               filtered.map((pkt) => {
                 const isSelected = pkt.id === selectedPacket?.id;
-                const preview =
-                  pkt.channelType === 'mqtt' && pkt.mqttTopic
+                const preview = pkt.isMarker
+                  ? pkt.markerText || '(空标记)'
+                  : pkt.channelType === 'mqtt' && pkt.mqttTopic
                     ? pkt.mqttTopic
                     : pkt.hexPreview;
                 return (
@@ -273,19 +276,27 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                     <span className="text-slate-500 w-20 shrink-0 tabular-nums text-[11px]">
                       +{(pkt.timestampUs / 1000).toFixed(1)}ms
                     </span>
-                    <span
-                      className={`text-[10px] font-sans font-semibold px-1.5 py-0.5 rounded border shrink-0 ${TYPE_BADGE[pkt.channelType]}`}
-                    >
-                      {TYPE_LABEL[pkt.channelType]}
-                    </span>
+                    {pkt.isMarker ? (
+                      <span className="text-[10px] font-sans font-semibold px-1.5 py-0.5 rounded border shrink-0 bg-violet-50 text-violet-700 border-violet-100">
+                        标记
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-[10px] font-sans font-semibold px-1.5 py-0.5 rounded border shrink-0 ${TYPE_BADGE[pkt.channelType]}`}
+                      >
+                        {TYPE_LABEL[pkt.channelType]}
+                      </span>
+                    )}
                     <span className="text-slate-800 font-medium truncate w-28 shrink-0">
                       {pkt.channelName.split(' ')[0]}
                     </span>
                     <span
                       className={`truncate flex-1 text-[11px] ${
-                        pkt.channelType === 'mqtt' && pkt.mqttTopic
-                          ? 'font-sans text-teal-800'
-                          : 'font-mono text-slate-700'
+                        pkt.isMarker
+                          ? 'font-sans text-violet-800'
+                          : pkt.channelType === 'mqtt' && pkt.mqttTopic
+                            ? 'font-sans text-teal-800'
+                            : 'font-mono text-slate-700'
                       }`}
                       title={preview}
                     >
@@ -395,6 +406,18 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                 </div>
               )}
 
+              {selectedPacket.isMarker && (
+                <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg text-violet-900 font-sans text-xs">
+                  <div className="font-bold mb-0.5">时间点标记（kind=marker）</div>
+                  <div className="break-all">
+                    {selectedPacket.markerText || '(空说明)'}
+                  </div>
+                  <div className="text-[10px] text-violet-700 mt-1">
+                    重放时不发往任何 sink；仅供标注与列表查看。
+                  </div>
+                </div>
+              )}
+
               {selectedPacket.hasError && (
                 <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 font-sans text-xs">
                   <div className="font-bold flex items-center gap-1.5 mb-0.5">
@@ -405,23 +428,27 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
                 </div>
               )}
 
-              <div>
-                <div className="text-[11px] font-sans font-semibold text-slate-700 mb-1">
-                  十六进制原始数据 (HEX):
-                </div>
-                <div className="p-3 bg-slate-900 text-emerald-400 rounded-lg font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800 select-all">
-                  {selectedPacket.hexPreview}
-                </div>
-              </div>
+              {!selectedPacket.isMarker && (
+                <>
+                  <div>
+                    <div className="text-[11px] font-sans font-semibold text-slate-700 mb-1">
+                      十六进制原始数据 (HEX):
+                    </div>
+                    <div className="p-3 bg-slate-900 text-emerald-400 rounded-lg font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800 select-all">
+                      {selectedPacket.hexPreview}
+                    </div>
+                  </div>
 
-              <div>
-                <div className="text-[11px] font-sans font-semibold text-slate-700 mb-1">
-                  ASCII 可见字符映射:
-                </div>
-                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 select-all break-all">
-                  {selectedPacket.asciiPreview}
-                </div>
-              </div>
+                  <div>
+                    <div className="text-[11px] font-sans font-semibold text-slate-700 mb-1">
+                      ASCII 可见字符映射:
+                    </div>
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 select-all break-all">
+                      {selectedPacket.asciiPreview}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="text-center py-10 text-slate-400 text-xs font-sans space-y-1">

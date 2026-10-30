@@ -28,6 +28,7 @@ import {
   Search,
   Activity,
   FileCheck,
+  BookmarkPlus,
 } from 'lucide-react';
 import { listRecordChannels } from '../engine/channelConfig';
 
@@ -48,6 +49,8 @@ interface FieldRecorderViewProps {
   onEngineStopRecord: () => Promise<unknown>;
   /** E8a：向引擎枚举本机 COM */
   onListSerialPorts?: () => Promise<string[]>;
+  /** E13d：录制中热插 marker（省略 relativeUs） */
+  onAddMarkerLive?: (text: string) => void | Promise<void>;
 }
 
 const FALLBACK_SERIAL_PORTS = ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11'];
@@ -65,9 +68,11 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   onEngineStartRecord,
   onEngineStopRecord,
   onListSerialPorts,
+  onAddMarkerLive,
 }) => {
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'paused'>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [liveMarkerText, setLiveMarkerText] = useState('');
   // 引擎已连接时默认关模拟；未连接时保留离线演示
   const [simulateHardwareStream, setSimulateHardwareStream] = useState(!engineConnected);
   const [busy, setBusy] = useState(false);
@@ -565,9 +570,35 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   </button>
                 )}
 
+                {engineConnected && onAddMarkerLive && recordState === 'recording' && (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={liveMarkerText}
+                      onChange={(e) => setLiveMarkerText(e.target.value)}
+                      placeholder="标记说明"
+                      className="w-28 sm:w-36 px-2 py-1 text-[11px] rounded-md bg-slate-800 border border-slate-600 text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        const t = liveMarkerText;
+                        void Promise.resolve(onAddMarkerLive(t)).then(() => {
+                          setLiveMarkerText('');
+                        });
+                      }}
+                      title="按当前相对戳写入 marker"
+                      className="flex items-center gap-1 px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-lg text-xs font-medium transition-colors"
+                    >
+                      <BookmarkPlus className="w-3.5 h-3.5" />
+                      <span>插标记</span>
+                    </button>
+                  </div>
+                )}
+
                 <button
-                  onClick={() => void handleStopAndPackage()}
-                  disabled={busy}
+                  onClick={() => void handleStopAndPackage()}                  disabled={busy}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold shadow-md transition-all"
                 >
                   <Square className="w-3 h-3 fill-white" />

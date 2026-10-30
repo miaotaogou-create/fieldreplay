@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E13 已选定**；E13a–c 完成 → 下一格 **E13d**（UI 插 marker + trim 另存） |
+| **下一步** | **E13 已收口**；现场再挑 E14 / E15 / E16 / R1 |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -173,7 +173,7 @@ fieldreplay/
 
 | 轨 | 首格 | 内容 | 状态 |
 |----|------|------|------|
-| A **E13** trim+marker | E13d | UI 插 marker；trim 另存/导出 | **进行中（E13a–c 已勾）** |
+| A **E13** trim+marker | — | E13a–d 全部完成 | **已收口** |
 | B **E14** pcap 导入 | E14a | 需求：支持链路与跳过规则；与 E10 往返期望 | 待命 |
 | C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
 | D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 | 待命 |
@@ -186,7 +186,7 @@ fieldreplay/
 | E13a | 需求入库（trim 时间窗、marker 时机、验收/非目标） | [x] | 2026-10-30：`docs/requirements/20261030-session-trim-marker.md`；闭区间再基、整表保留、非目标含 merge |
 | E13b | 引擎：控制面插 `kind=marker` + 自检 | [x] | 2026-10-30：`session.addMarker`；录制热写 `LiveRecordSink` / 离线 `relativeUs`；自检离线+热插读回 aux |
 | E13c | 引擎：时间窗 trim 写出新 `.fcap` + 自检 | [x] | 2026-10-30：`session.trim` 闭区间再基；整表通道；notes 追加；非法/空窗失败；自检多通道+marker |
-| E13d | UI：插 marker；trim 导出/另存 | [ ] | |
+| E13d | UI：插 marker；trim 导出/另存 | [x] | 2026-10-30：重演页 `SessionMarkerTrimPanel`；录制热插；报文列表可见 marker；`kind=3` 不再误标故障；未连引擎拒绝假写入 |
 
 #### E14 pcap 导入
 

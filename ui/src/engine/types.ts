@@ -141,6 +141,27 @@ export interface EngineSessionExportPcapResult {
   b64: string;
 }
 
+/** E13b：插入 marker */
+export interface EngineAddMarkerResult {
+  added: boolean;
+  live: boolean;
+  kind: number;
+  relativeUs: number;
+  ch: number;
+  text: string;
+}
+
+/** E13c：时间窗 trim */
+export interface EngineTrimResult {
+  trimmed: boolean;
+  fromUs: number;
+  toUs: number;
+  packetCount: number;
+  bytes: number;
+  replaced: boolean;
+  b64: string;
+}
+
 /** E8a：本机串口枚举 */
 export interface EngineSerialListResult {
   ports: string[];

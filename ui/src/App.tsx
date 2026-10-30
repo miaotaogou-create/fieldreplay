@@ -501,6 +501,88 @@ export default function App() {
     showToast(`已成功载入数据包：${metadata.sessionTitle} (${packets.length} 帧)`);
   };
 
+  const refreshSessionFromEngine = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const bytes = await engine.exportSessionBytes();
+    const dto = await engine.loadSessionBytes(bytes);
+    const mapped = mapEngineSession(dto);
+    setSessionMetadata(mapped.metadata);
+    setRecordedPackets(mapped.packets);
+    return mapped;
+  };
+
+  const handleAddMarkerAt = async (text: string, relativeUs: number) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      showToast('未连引擎：不会本地假写入正式包');
+      return;
+    }
+    try {
+      const result = await engine.addMarker({ text, relativeUs });
+      if (!result.live) {
+        await refreshSessionFromEngine();
+      }
+      showToast(
+        result.live
+          ? `已热插标记 @ ${result.relativeUs} µs`
+          : `已插入标记 @ ${result.relativeUs} µs`
+      );
+    } catch (e) {
+      showToast(`插入标记失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleAddMarkerLive = async (text: string) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      showToast('未连引擎：不会本地假写入正式包');
+      return;
+    }
+    try {
+      const result = await engine.addMarker({ text });
+      showToast(`已热插标记 @ ${result.relativeUs} µs`);
+    } catch (e) {
+      showToast(`插入标记失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleTrimDownload = async (fromUs: number, toUs: number) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      showToast('未连引擎：无法裁剪正式包');
+      return;
+    }
+    try {
+      const { bytes, packetCount } = await engine.trimSessionBytes({
+        fromUs,
+        toUs,
+        replaceSession: false,
+      });
+      if (
+        bytes.length < 4
+        || bytes[0] !== 0x46
+        || bytes[1] !== 0x43
+        || bytes[2] !== 0x41
+        || bytes[3] !== 0x50
+      ) {
+        throw new Error('引擎返回内容不是二进制 .fcap');
+      }
+      const base =
+        sessionMetadata.sessionTitle?.replace(/\.fcap$/i, '')
+        || `现场裁剪_${Date.now()}`;
+      const fileName = `${base}_trim_${fromUs}-${toUs}.fcap`;
+      const ab = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(ab).set(bytes);
+      downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);
+      showToast(`已另存裁剪包（${packetCount} 帧，再基 [ ${fromUs}, ${toUs} ]）`);
+    } catch (e) {
+      showToast(`裁剪失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   const handleLoadCaptureFile = async (file: File) => {
     const engine = engineRef.current;
     const lower = file.name.toLowerCase();
@@ -605,6 +687,7 @@ export default function App() {
             onEngineStartRecord={handleEngineStartRecord}
             onEngineStopRecord={handleEngineStopRecord}
             onListSerialPorts={handleListSerialPorts}
+            onAddMarkerLive={handleAddMarkerLive}
           />
         )}
 
@@ -624,6 +707,8 @@ export default function App() {
             onEngineResumeReplay={handleEngineResumeReplay}
             onEngineSeekReplay={handleEngineSeekReplay}
             onListSerialPorts={handleListSerialPorts}
+            onAddMarkerAt={handleAddMarkerAt}
+            onTrimDownload={handleTrimDownload}
           />
         )}
 

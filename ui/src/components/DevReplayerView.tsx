@@ -17,6 +17,7 @@ import {
 } from '../engine/multiReplayTargets';
 import { formatSerialLineSummary } from '../utils/serialParams';
 import { ReplayChannelTargets } from './ReplayChannelTargets';
+import { SessionMarkerTrimPanel } from './SessionMarkerTrimPanel';
 import {
   Play,
   Pause,
@@ -71,6 +72,10 @@ interface DevReplayerViewProps {
   onEngineSeekReplay?: (relativeUs: number) => Promise<unknown>;
   /** E8a：向引擎枚举本机 COM；未连引擎时不调用 */
   onListSerialPorts?: () => Promise<string[]>;
+  /** E13d：播放头插 marker（须连引擎；重放中由引擎拒绝） */
+  onAddMarkerAt?: (text: string, relativeUs: number) => void | Promise<void>;
+  /** E13d：时间窗 trim 另存下载 */
+  onTrimDownload?: (fromUs: number, toUs: number) => void | Promise<void>;
 }
 
 const FALLBACK_SERIAL_PORTS = [
@@ -99,6 +104,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   onEngineResumeReplay,
   onEngineSeekReplay,
   onListSerialPorts,
+  onAddMarkerAt,
+  onTrimDownload,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   /** 引擎重放已启动且处于暂停（时间轴冻结）；离线 mock 不用此态 */
@@ -652,21 +659,41 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               disabled={!hasPackets}
               className="w-full h-2 bg-slate-800 rounded-md appearance-none accent-sky-500 hover:accent-sky-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:accent-sky-500"
             />
-            {/* 故障点：菱形标记（避免两根竖条像「暂停」） */}
+            {/* 故障点：菱形；标记点：圆点 */}
             {totalDurationUs > 0 &&
-              packets.map((p, idx) =>
-                p.hasError ? (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => seekToUs(p.timestampUs)}
-                    title={`故障点：${p.errorReason || '异常帧'}（点击跳转）`}
-                    aria-label={`故障点：${p.errorReason || '异常帧'}`}
-                    className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-rose-500 border border-rose-200 shadow-sm cursor-pointer hover:scale-150 transition-transform z-10"
-                    style={{ left: `${(p.timestampUs / totalDurationUs) * 100}%` }}
-                  />
-                ) : null
-              )}
+              packets.map((p) => {
+                if (p.isMarker) {
+                  return (
+                    <button
+                      key={`m-${p.id}`}
+                      type="button"
+                      onClick={() => seekToUs(p.timestampUs)}
+                      title={`标记：${p.markerText || '(空)'}（点击跳转）`}
+                      aria-label={`标记：${p.markerText || '(空)'}`}
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-violet-400 border border-violet-100 shadow-sm cursor-pointer hover:scale-150 transition-transform z-10"
+                      style={{
+                        left: `${(p.timestampUs / totalDurationUs) * 100}%`,
+                      }}
+                    />
+                  );
+                }
+                if (p.hasError) {
+                  return (
+                    <button
+                      key={`e-${p.id}`}
+                      type="button"
+                      onClick={() => seekToUs(p.timestampUs)}
+                      title={`故障点：${p.errorReason || '异常帧'}（点击跳转）`}
+                      aria-label={`故障点：${p.errorReason || '异常帧'}`}
+                      className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-rose-500 border border-rose-200 shadow-sm cursor-pointer hover:scale-150 transition-transform z-10"
+                      style={{
+                        left: `${(p.timestampUs / totalDurationUs) * 100}%`,
+                      }}
+                    />
+                  );
+                }
+                return null;
+              })}
           </div>
         </div>
 
@@ -794,6 +821,18 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           </div>
         </div>
       </div>
+
+      {onAddMarkerAt && onTrimDownload && (
+        <SessionMarkerTrimPanel
+          engineConnected={engineConnected}
+          hasPackets={hasPackets}
+          currentTimeUs={currentTimeUs}
+          durationUs={totalDurationUs}
+          engineReplayBusy={engineBusy}
+          onAddMarker={onAddMarkerAt}
+          onTrimDownload={onTrimDownload}
+        />
+      )}
 
       {/* 下方面板随窗口伸缩；内容过多时仅此区域滚动 */}
       <div className="fr-page-scroll flex flex-col gap-3">

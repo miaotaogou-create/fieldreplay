@@ -20,6 +20,8 @@ import {
   EngineSessionDto,
   EngineSessionExportResult,
   EngineSessionExportPcapResult,
+  EngineAddMarkerResult,
+  EngineTrimResult,
   EngineSerialListResult,
 } from './types';
 
@@ -262,6 +264,47 @@ export class EngineClient {
   /** E8a：枚举本机串口（Windows COM） */
   listSerialPorts(): Promise<EngineSerialListResult> {
     return this.request<EngineSerialListResult>('serial.list', {});
+  }
+
+  /** E13b：插入 marker；录制中省略 relativeUs，离线必填 */
+  addMarker(args: {
+    text: string;
+    relativeUs?: number;
+    ch?: number;
+  }): Promise<EngineAddMarkerResult> {
+    const fields: Record<string, unknown> = { text: args.text };
+    if (args.relativeUs !== undefined) fields.relativeUs = args.relativeUs;
+    if (args.ch !== undefined) fields.ch = args.ch;
+    return this.request<EngineAddMarkerResult>('session.addMarker', fields);
+  }
+
+  /** E13c：按相对时间窗裁出新 `.fcap`（默认不替换内存会话） */
+  trimSession(args: {
+    fromUs: number;
+    toUs: number;
+    replaceSession?: boolean;
+  }): Promise<EngineTrimResult> {
+    const fields: Record<string, unknown> = {
+      fromUs: args.fromUs,
+      toUs: args.toUs,
+    };
+    if (args.replaceSession !== undefined) {
+      fields.replaceSession = args.replaceSession;
+    }
+    return this.request<EngineTrimResult>('session.trim', fields);
+  }
+
+  async trimSessionBytes(args: {
+    fromUs: number;
+    toUs: number;
+    replaceSession?: boolean;
+  }): Promise<{ bytes: Uint8Array; packetCount: number; replaced: boolean }> {
+    const result = await this.trimSession(args);
+    return {
+      bytes: base64ToBytes(result.b64),
+      packetCount: result.packetCount,
+      replaced: result.replaced,
+    };
   }
 }
 
