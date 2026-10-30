@@ -4,19 +4,14 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::fcap::{ChannelType, PacketRecord, SessionReader};
 use crate::mqtt::MqttConfig;
 use crate::multi_record::{
-    record_multi_to_file, ChannelJob, MultiRecordOptions, PacketHook,
-};
-use crate::record::{
-    record_mqtt_to_file_with, record_serial_to_file_with, record_tcp_to_file_with,
-    record_udp_to_file_with, record_video_to_file_with, MqttRecordOptions, OnPacket, RecordOptions,
-    SerialRecordOptions, TcpRecordOptions,
+    record_multi_to_file, ChannelJob, LiveRecordSink, MultiRecordOptions, PacketHook,
 };
 use crate::serial::{Parity, SerialConfig};
 use crate::tcp::{TcpConfig, TcpRole};
@@ -46,11 +41,19 @@ pub fn handle_record_start(
         let _ = std::fs::create_dir_all(parent);
     }
 
-    // E11a：非空 channels[] 优先；否则走旧单路 type+config
+    // E11a：非空 channels[] 优先；单路 type+config 也走多路写盘（共享 LiveRecordSink）
     if let Some(arr) = extract_array(msg, "channels") {
         let elems = split_json_array_elements(&arr);
         if !elems.is_empty() {
-            return start_multi_record(id, &elems, session_title, out_path, state_recording, hub);
+            return start_multi_record(
+                id,
+                &elems,
+                session_title,
+                out_path,
+                state_recording,
+                hub,
+                "multi".into(),
+            );
         }
     }
 
@@ -60,40 +63,8 @@ pub fn handle_record_start(
     };
     let name = extract_str(msg, "name").unwrap_or_else(|| ty.clone());
     let config_raw = extract_object(msg, "config").unwrap_or_else(|| "{}".into());
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let packet_count = Arc::new(AtomicU64::new(0));
-    let hub_c = Arc::clone(hub);
-    let stop_c = Arc::clone(&stop);
-    let count_c = Arc::clone(&packet_count);
-    let out_c = out_path.clone();
-    let name_c = name.clone();
-    let title_c = session_title.clone();
-    let ty_c = ty.clone();
-    let config_c = config_raw.clone();
-
-    let join = thread::spawn(move || {
-        let result = run_record(
-            &ty_c,
-            &config_c,
-            &out_c,
-            &name_c,
-            title_c.as_deref(),
-            &stop_c,
-            &count_c,
-            &hub_c,
-        );
-        if let Err(ref e) = result {
-            hub_c.broadcast(&format!(
-                "{{\"event\":\"record.error\",\"error\":\"{}\"}}",
-                escape_str(&e.to_string())
-            ));
-        }
-        result
-    });
-
-    let channel_json = format!(
-        "{{\"index\":0,\"type\":\"{}\",\"name\":\"{}\",\"config\":{}}}",
+    let elem = format!(
+        "{{\"type\":\"{}\",\"name\":\"{}\",\"config\":{}}}",
         escape_str(&ty),
         escape_str(&name),
         if config_raw.trim().is_empty() {
@@ -102,21 +73,14 @@ pub fn handle_record_start(
             config_raw.as_str()
         }
     );
-
-    *state_recording = Some(ActiveRecording {
-        stop,
-        out_path: out_path.clone(),
-        channel_type: ty,
-        packet_count,
-        join: Some(join),
-    });
-
-    ok_result(
+    start_multi_record(
         id,
-        &format!(
-            "{{\"started\":true,\"out\":\"{}\",\"channel\":{channel_json}}}",
-            escape_str(&out_path.to_string_lossy())
-        ),
+        &[elem],
+        session_title,
+        out_path,
+        state_recording,
+        hub,
+        ty,
     )
 }
 
@@ -127,6 +91,7 @@ fn start_multi_record(
     out_path: PathBuf,
     state_recording: &mut Option<ActiveRecording>,
     hub: &Arc<PushHub>,
+    channel_type: String,
 ) -> String {
     let mut jobs = Vec::with_capacity(elems.len());
     let mut channels_json = String::from("[");
@@ -149,14 +114,25 @@ fn start_multi_record(
 
     let stop = Arc::new(AtomicBool::new(false));
     let packet_count = Arc::new(AtomicU64::new(0));
+    let live_sink: Arc<Mutex<Option<Arc<LiveRecordSink>>>> = Arc::new(Mutex::new(None));
     let hub_c = Arc::clone(hub);
     let stop_c = Arc::clone(&stop);
     let count_c = Arc::clone(&packet_count);
+    let live_c = Arc::clone(&live_sink);
     let out_c = out_path.clone();
     let title_c = session_title;
 
     // 预览：按帧类型推断推送 type 字符串
     let type_by_ch: Vec<String> = jobs.iter().map(channel_job_type_str).collect();
+    let reply_single = jobs.len() == 1 && channel_type != "multi";
+    let single_channel_json = reply_single.then(|| {
+        let job = &jobs[0];
+        format!(
+            "{{\"index\":0,\"type\":\"{}\",\"name\":\"{}\"}}",
+            escape_str(&channel_job_type_str(job)),
+            escape_str(job.name())
+        )
+    });
 
     let join = thread::spawn(move || {
         let hub_hook = Arc::clone(&hub_c);
@@ -181,6 +157,7 @@ fn start_multi_record(
             &jobs,
             &stop_c,
             Some(hook),
+            Some(live_c),
         );
         if let Err(ref e) = result {
             hub_c.broadcast(&format!(
@@ -194,18 +171,29 @@ fn start_multi_record(
     *state_recording = Some(ActiveRecording {
         stop,
         out_path: out_path.clone(),
-        channel_type: "multi".into(),
+        channel_type,
         packet_count,
         join: Some(join),
+        live_sink,
     });
 
-    ok_result(
-        id,
-        &format!(
-            "{{\"started\":true,\"out\":\"{}\",\"channels\":{channels_json}}}",
-            escape_str(&out_path.to_string_lossy())
-        ),
-    )
+    if let Some(channel_json) = single_channel_json {
+        ok_result(
+            id,
+            &format!(
+                "{{\"started\":true,\"out\":\"{}\",\"channel\":{channel_json}}}",
+                escape_str(&out_path.to_string_lossy())
+            ),
+        )
+    } else {
+        ok_result(
+            id,
+            &format!(
+                "{{\"started\":true,\"out\":\"{}\",\"channels\":{channels_json}}}",
+                escape_str(&out_path.to_string_lossy())
+            ),
+        )
+    }
 }
 
 fn channel_job_type_str(job: &ChannelJob) -> String {
@@ -333,102 +321,6 @@ fn default_out_path() -> String {
     dir.join(format!("rec_{ms}.fcap"))
         .to_string_lossy()
         .into_owned()
-}
-
-fn run_record(
-    ty: &str,
-    config: &str,
-    out: &PathBuf,
-    name: &str,
-    title: Option<&str>,
-    stop: &AtomicBool,
-    packet_count: &Arc<AtomicU64>,
-    hub: &Arc<PushHub>,
-) -> io::Result<u64> {
-    let hub = Arc::clone(hub);
-    let count = Arc::clone(packet_count);
-    let ch_ty = parse_channel_type(ty)?;
-    let mut hook = move |pkt: &PacketRecord| {
-        let i = count.fetch_add(1, Ordering::SeqCst);
-        hub.broadcast(&packet_event_json(i, pkt, ch_ty));
-    };
-    let mut on: OnPacket<'_> = Some(&mut hook);
-    let poll = Duration::from_millis(200);
-    let title_owned = title.map(|s| s.to_string());
-
-    match ty {
-        "udp" => {
-            let bind = parse_udp_bind(config)?;
-            let opts = RecordOptions {
-                bind,
-                out_path: out.clone(),
-                channel_name: name.to_string(),
-                session_title: title_owned,
-                max_duration: None,
-                poll_timeout: poll,
-            };
-            record_udp_to_file_with(&opts, stop, &mut on)
-        }
-        "serial" => {
-            let cfg = parse_serial(config)?;
-            let opts = SerialRecordOptions {
-                config: cfg,
-                out_path: out.clone(),
-                channel_name: name.to_string(),
-                session_title: title_owned,
-                max_duration: None,
-                poll_timeout: poll,
-            };
-            record_serial_to_file_with(&opts, stop, &mut on)
-        }
-        "tcp" => {
-            let cfg = TcpConfig::from_config_json(config).or_else(|_| parse_tcp_loose(config))?;
-            let opts = TcpRecordOptions {
-                config: cfg,
-                out_path: out.clone(),
-                channel_name: name.to_string(),
-                session_title: title_owned,
-                max_duration: None,
-                poll_timeout: poll,
-            };
-            record_tcp_to_file_with(&opts, stop, &mut on)
-        }
-        "mqtt" => {
-            let cfg = MqttConfig::from_config_json(config)?;
-            let opts = MqttRecordOptions {
-                config: cfg,
-                out_path: out.clone(),
-                channel_name: name.to_string(),
-                session_title: title_owned,
-                max_duration: None,
-                poll_timeout: poll,
-            };
-            record_mqtt_to_file_with(&opts, stop, &mut on)
-        }
-        "video" | "video_stream" => {
-            let rtsp = extract_str(config, "rtsp_url").or_else(|| extract_str(config, "streamUrl"));
-            let has_rtsp = rtsp.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
-            // E7c：有 RTSP URL 时 bind 仅写入 config 备注，缺省 0.0.0.0:0
-            let bind = if has_rtsp {
-                parse_udp_bind(config).unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap())
-            } else {
-                parse_udp_bind(config)?
-            };
-            let opts = RecordOptions {
-                bind,
-                out_path: out.clone(),
-                channel_name: name.to_string(),
-                session_title: title_owned,
-                max_duration: None,
-                poll_timeout: poll,
-            };
-            record_video_to_file_with(&opts, rtsp.as_deref(), stop, &mut on)
-        }
-        other => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("不支持的通道类型: {other}"),
-        )),
-    }
 }
 
 fn parse_channel_type(ty: &str) -> io::Result<ChannelType> {

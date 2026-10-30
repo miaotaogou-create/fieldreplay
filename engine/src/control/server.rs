@@ -1,4 +1,5 @@
 //! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
+//! E13b：`session.addMarker`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -18,6 +19,7 @@ use super::json_util::{
     err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
 };
 use super::live::{handle_record_start, handle_record_stop};
+use super::marker::handle_session_add_marker;
 use super::replay_live::{
     handle_replay_pause, handle_replay_resume, handle_replay_seek, handle_replay_start,
     handle_replay_stop,
@@ -185,6 +187,7 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
         }
         "session.export" => handle_session_export(&id, msg, state),
         "session.exportPcap" => handle_session_export_pcap(&id, state),
+        "session.addMarker" => handle_session_add_marker(&id, msg, state),
         "record.start" => match state.lock() {
             Ok(mut g) => {
                 g.reap_finished_replay();
@@ -515,9 +518,98 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_replay_seek_via_ws(&mut client, &path)?;
     self_check_replay_fault_via_ws(&mut client, &path)?;
     self_check_replay_loop_via_ws(&mut client, &path)?;
+    // E13b：离线插 marker（放在重放自检之后，避免改内存会话干扰）
+    self_check_add_marker_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
+    Ok(())
+}
+
+fn self_check_add_marker_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let open = format!(
+        r#"{{"id":"e13b0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 addMarker 前 open 响应")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("addMarker 前 session.open 失败: {opened}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13b1","cmd":"session.addMarker","text":"e13b-mark","relativeUs":25000,"ch":0}"#,
+    )?;
+    let added = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 session.addMarker 响应")
+    })?;
+    if !added.contains("\"ok\":true")
+        || !added.contains("\"added\":true")
+        || !added.contains("e13b-mark")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("session.addMarker 失败: {added}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13b2","cmd":"session.export","meta":{"session_title":"e13b-marker"}}"#,
+    )?;
+    let exported = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 addMarker 后 export 响应")
+    })?;
+    if !exported.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("addMarker 后 export 失败: {exported}"),
+        ));
+    }
+    let b64s = extract_str(&exported, "b64").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "addMarker export 缺 b64")
+    })?;
+    let bytes = b64::decode(&b64s).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("addMarker export b64 无效: {e}"))
+    })?;
+    let mut reader = SessionReader::open_bytes(bytes)?;
+    let packets = reader.read_all_packets()?;
+    let marker = packets
+        .iter()
+        .find(|p| p.kind == PacketKind::Marker)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "导出结果中无 marker 帧")
+        })?;
+    if marker.aux.as_slice() != b"e13b-mark" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "marker aux 不一致: {:?}",
+                String::from_utf8_lossy(&marker.aux)
+            ),
+        ));
+    }
+    if marker.relative_us != 25_000 || !marker.payload.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "marker 字段异常: relative={} payload={}",
+                marker.relative_us,
+                marker.payload.len()
+            ),
+        ));
+    }
+    // 恢复干净 sample，避免后续重放自检吃到 marker
+    write_text_frame_client(client, &open)?;
+    let _ = read_text_frame(client)?;
+
+    eprintln!("  控制面 session.addMarker 离线写读：通过");
     Ok(())
 }
 
@@ -924,10 +1016,13 @@ fn self_check_replay_seek_via_ws(client: &mut TcpStream, session_path: &Path) ->
     write_text_frame_client(client, r#"{"id":"s3","cmd":"replay.stop"}"#)?;
     let stopped = drain_until_id(client, "s3")?;
     if !stopped.contains("\"ok\":true") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("seek 自检 replay.stop 失败: {stopped}"),
-        ));
+        // seek 到末帧后线程可能已自然结束并回收槽位
+        if !(saw_seek_progress && stopped.contains("当前未在重放")) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("seek 自检 replay.stop 失败: {stopped}"),
+            ));
+        }
     }
 
     eprintln!("  控制面 replay.seek：通过");
@@ -1183,6 +1278,46 @@ fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
         thread::sleep(Duration::from_millis(40));
     }
 
+    // E13b：录制中热插 marker
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13b-live","cmd":"session.addMarker","text":"live-mark"}"#,
+    )?;
+    let mut live_mark_ok = false;
+    client.set_read_timeout(Some(Duration::from_millis(800)))?;
+    for _ in 0..24 {
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"id\":\"e13b-live\"") {
+                    if frame.contains("\"ok\":true") && frame.contains("live-mark") {
+                        live_mark_ok = true;
+                    } else {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("录制中 addMarker 失败: {frame}"),
+                        ));
+                    }
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+    if !live_mark_ok {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "录制中 session.addMarker 无成功响应",
+        ));
+    }
+
     // 收取预览推送（可能夹杂在 stop 之前）
     let mut saw_packet_event = false;
     client.set_read_timeout(Some(Duration::from_millis(300)))?;
@@ -1235,17 +1370,35 @@ fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
             ));
         }
     }
-    // 期望至少收到若干帧
+    // 期望至少收到若干帧（含热插 marker）
     if let Some(n) = extract_packet_count(&stop_reply) {
-        if n < 3 {
+        if n < 4 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("期望至少 3 帧，实际 {n}；推送={saw_packet_event}"),
+                format!("期望至少 4 帧（含 marker），实际 {n}；推送={saw_packet_event}"),
             ));
         }
     }
 
-    eprintln!("  控制面 record.start/stop UDP 环回：通过");
+    let mut reader = SessionReader::open(&out)?;
+    let packets = reader.read_all_packets()?;
+    let live_marker = packets
+        .iter()
+        .find(|p| p.kind == PacketKind::Marker)
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "录制落盘无 marker 帧")
+        })?;
+    if live_marker.aux.as_slice() != b"live-mark" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "录制 marker aux 不一致: {:?}",
+                String::from_utf8_lossy(&live_marker.aux)
+            ),
+        ));
+    }
+
+    eprintln!("  控制面 record.start/stop UDP 环回 + 热插 marker：通过");
     Ok(())
 }
 

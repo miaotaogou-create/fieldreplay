@@ -110,13 +110,16 @@ pub struct MultiRecordOptions {
     pub poll_timeout: Duration,
 }
 
-struct SharedSink {
+/// 多路录制共享写盘句柄；控制面可经此热插 `kind=marker`。
+pub struct LiveRecordSink {
     writer: Arc<Mutex<SessionWriter>>,
     clock: SessionClock,
+    channel_count: u16,
+    hook: Option<PacketHook>,
 }
 
-impl SharedSink {
-    fn append(&self, pkt: &PacketRecord, hook: &Option<PacketHook>) -> io::Result<()> {
+impl LiveRecordSink {
+    fn append(&self, pkt: &PacketRecord) -> io::Result<()> {
         {
             let mut w = self
                 .writer
@@ -124,19 +127,51 @@ impl SharedSink {
                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "写盘锁中毒"))?;
             w.append_packet(pkt)?;
         }
-        if let Some(cb) = hook {
+        if let Some(cb) = &self.hook {
             cb(pkt);
         }
         Ok(())
     }
+
+    /// 按当前相对戳写入 marker（payload 空，aux=UTF-8 说明）。
+    pub fn append_marker(&self, text: &str, channel_index: u16) -> io::Result<PacketRecord> {
+        if self.channel_count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "无通道表，无法插入 marker",
+            ));
+        }
+        if channel_index >= self.channel_count {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "通道索引 {channel_index} 超出范围（0..{}）",
+                    self.channel_count.saturating_sub(1)
+                ),
+            ));
+        }
+        let pkt = PacketRecord {
+            relative_us: self.clock.relative_us(),
+            channel_index,
+            kind: PacketKind::Marker,
+            direction: 0,
+            flags: 0,
+            aux: text.as_bytes().to_vec(),
+            payload: Vec::new(),
+        };
+        self.append(&pkt)?;
+        Ok(pkt)
+    }
 }
 
 /// 多路并发录制到同一 `.fcap`。任一路启动期失败则停其余并返回 Err。
+/// `live_out` 非空时，写盘句柄就绪后写入供控制面热插 marker；结束时清空。
 pub fn record_multi_to_file(
     opts: &MultiRecordOptions,
     jobs: &[ChannelJob],
     stop: &AtomicBool,
     hook: Option<PacketHook>,
+    live_out: Option<Arc<Mutex<Option<Arc<LiveRecordSink>>>>>,
 ) -> io::Result<u64> {
     if jobs.is_empty() {
         return Err(io::Error::new(
@@ -167,10 +202,17 @@ pub fn record_multi_to_file(
         &channels,
         meta.as_deref(),
     )?));
-    let sink = Arc::new(SharedSink {
+    let sink = Arc::new(LiveRecordSink {
         writer: Arc::clone(&writer),
         clock,
+        channel_count: jobs.len() as u16,
+        hook: hook.clone(),
     });
+    if let Some(slot) = &live_out {
+        if let Ok(mut g) = slot.lock() {
+            *g = Some(Arc::clone(&sink));
+        }
+    }
 
     let ready_ok = Arc::new(AtomicU64::new(0));
     let ready_fail = Arc::new(AtomicBool::new(false));
@@ -182,7 +224,6 @@ pub fn record_multi_to_file(
         let sink_c = Arc::clone(&sink);
         let stop_c = Arc::clone(&workers_stop);
         let job_c = job.clone();
-        let hook_c = hook.clone();
         let ready_ok_c = Arc::clone(&ready_ok);
         let ready_fail_c = Arc::clone(&ready_fail);
         let fail_msg_c = Arc::clone(&fail_msg);
@@ -199,7 +240,6 @@ pub fn record_multi_to_file(
                 &run_stop,
                 max_dur,
                 poll,
-                &hook_c,
                 &ready_ok_c,
                 &ready_fail_c,
                 &fail_msg_c,
@@ -235,6 +275,11 @@ pub fn record_multi_to_file(
         } else {
             msg
         };
+        if let Some(slot) = &live_out {
+            if let Ok(mut g) = slot.lock() {
+                *g = None;
+            }
+        }
         let _ = std::fs::remove_file(&opts.out_path);
         return Err(io::Error::new(io::ErrorKind::Other, msg));
     }
@@ -269,6 +314,12 @@ pub fn record_multi_to_file(
         }
     }
 
+    if let Some(slot) = &live_out {
+        if let Ok(mut g) = slot.lock() {
+            *g = None;
+        }
+    }
+
     let count = {
         let mut w = writer
             .lock()
@@ -292,11 +343,10 @@ pub fn record_multi_to_file(
 fn run_job(
     job: &ChannelJob,
     channel_index: u16,
-    sink: &SharedSink,
+    sink: &LiveRecordSink,
     stop: &AtomicBool,
     max_duration: Option<Duration>,
     poll_timeout: Duration,
-    hook: &Option<PacketHook>,
     ready_ok: &AtomicU64,
     ready_fail: &AtomicBool,
     fail_msg: &Mutex<String>,
@@ -321,7 +371,7 @@ fn run_job(
             };
             ready_ok.fetch_add(1, Ordering::SeqCst);
             eprintln!("录制中（多路 UDP）：{name} bind {bind}");
-            run_datagram_loop(sink, channel_index, &sock, stop, max_duration, hook)
+            run_datagram_loop(sink, channel_index, &sock, stop, max_duration)
         }
         ChannelJob::Video {
             bind,
@@ -363,7 +413,7 @@ fn run_job(
                                 aux: b"rtsp".to_vec(),
                                 payload,
                             };
-                            sink.append(&pkt, hook)?;
+                            sink.append(&pkt)?;
                             count += 1;
                         }
                         None => continue,
@@ -381,7 +431,7 @@ fn run_job(
                 };
                 ready_ok.fetch_add(1, Ordering::SeqCst);
                 eprintln!("录制中（多路视频·RTP/UDP）：{name} bind {bind}");
-                run_datagram_loop(sink, channel_index, &sock, stop, max_duration, hook)
+                run_datagram_loop(sink, channel_index, &sock, stop, max_duration)
             }
         }
         ChannelJob::Serial { config, name } => {
@@ -413,7 +463,7 @@ fn run_job(
                             aux: Vec::new(),
                             payload: buf[..n].to_vec(),
                         };
-                        sink.append(&pkt, hook)?;
+                        sink.append(&pkt)?;
                         count += 1;
                     }
                     _ => continue,
@@ -455,14 +505,13 @@ fn run_job(
                                     flags: 0,
                                     aux: tcp_peer_aux(peer),
                                     payload: Vec::new(),
-                                },
-                                hook,
+                                }
                             )?;
                             s
                         }
                         None => return Ok(0),
                     };
-                    run_tcp_data_loop(sink, channel_index, stream, stop, max_duration, hook)
+                    run_tcp_data_loop(sink, channel_index, stream, stop, max_duration)
                 }
                 TcpRole::Client => {
                     let addr = match config.socket_addr() {
@@ -494,10 +543,9 @@ fn run_job(
                             flags: 0,
                             aux: tcp_peer_aux(peer),
                             payload: Vec::new(),
-                        },
-                        hook,
+                        }
                     )?;
-                    run_tcp_data_loop(sink, channel_index, stream, stop, max_duration, hook)
+                    run_tcp_data_loop(sink, channel_index, stream, stop, max_duration)
                 }
             }
         }
@@ -536,7 +584,7 @@ fn run_job(
                             aux: msg.topic.into_bytes(),
                             payload: msg.payload,
                         };
-                        sink.append(&pkt, hook)?;
+                        sink.append(&pkt)?;
                         count += 1;
                     }
                     None => continue,
@@ -549,12 +597,11 @@ fn run_job(
 }
 
 fn run_datagram_loop(
-    sink: &SharedSink,
+    sink: &LiveRecordSink,
     channel_index: u16,
     sock: &std::net::UdpSocket,
     stop: &AtomicBool,
     max_duration: Option<Duration>,
-    hook: &Option<PacketHook>,
 ) -> io::Result<u64> {
     let mut buf = vec![0u8; 65535];
     let mut count = 0u64;
@@ -575,7 +622,7 @@ fn run_datagram_loop(
                     aux: peer_aux(peer),
                     payload: buf[..n].to_vec(),
                 };
-                sink.append(&pkt, hook)?;
+                sink.append(&pkt)?;
                 count += 1;
             }
             None => continue,
@@ -585,12 +632,11 @@ fn run_datagram_loop(
 }
 
 fn run_tcp_data_loop(
-    sink: &SharedSink,
+    sink: &LiveRecordSink,
     channel_index: u16,
     stream: std::net::TcpStream,
     stop: &AtomicBool,
     max_duration: Option<Duration>,
-    hook: &Option<PacketHook>,
 ) -> io::Result<u64> {
     let mut buf = vec![0u8; 65535];
     let mut count = 1u64; // 已写 TcpConnect
@@ -612,8 +658,7 @@ fn run_tcp_data_loop(
                         flags: 0,
                         aux: Vec::new(),
                         payload: buf[..n].to_vec(),
-                    },
-                    hook,
+                    }
                 )?;
                 count += 1;
             }
@@ -629,8 +674,7 @@ fn run_tcp_data_loop(
                         flags: 0,
                         aux: b"eof".to_vec(),
                         payload: Vec::new(),
-                    },
-                    hook,
+                    }
                 )?;
                 count += 1;
             }
@@ -646,8 +690,7 @@ fn run_tcp_data_loop(
                 flags: 0,
                 aux: b"stop".to_vec(),
                 payload: Vec::new(),
-            },
-            hook,
+            }
         )?;
         count += 1;
         drop(stream);
@@ -711,6 +754,7 @@ pub fn self_check_multi_udp() -> io::Result<()> {
                 },
             ],
             &stop_c,
+            None,
             None,
         )
     });

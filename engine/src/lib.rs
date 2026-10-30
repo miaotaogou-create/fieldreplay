@@ -27,7 +27,8 @@ pub use mqtt::{
     write_test_ca_file, MiniBroker, MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
 };
 pub use multi_record::{
-    record_multi_to_file, self_check_multi_udp, ChannelJob, MultiRecordOptions, PacketHook,
+    record_multi_to_file, self_check_multi_udp, ChannelJob, LiveRecordSink, MultiRecordOptions,
+    PacketHook,
 };
 pub use multi_replay::{
     open_datagram_target, open_mqtt_multi_target, open_serial_multi_target, open_tcp_multi_target,

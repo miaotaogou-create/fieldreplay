@@ -2,10 +2,11 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use crate::fcap::{ChannelEntry, PacketRecord};
+use crate::multi_record::LiveRecordSink;
 
 pub struct ActiveRecording {
     pub stop: Arc<AtomicBool>,
@@ -13,6 +14,8 @@ pub struct ActiveRecording {
     pub channel_type: String,
     pub packet_count: Arc<AtomicU64>,
     pub join: Option<JoinHandle<std::io::Result<u64>>>,
+    /// 录制线程就绪后填入，供 `session.addMarker` 热写。
+    pub live_sink: Arc<Mutex<Option<Arc<LiveRecordSink>>>>,
 }
 
 pub struct ActiveReplay {

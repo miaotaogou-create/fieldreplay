@@ -69,11 +69,11 @@
 - [x] 需求入库；trim 时间窗、再基、通道表/meta、marker 时机与非目标写清
 - [x] 与 `docs/design/fcap-format.md` 的 `kind=marker` 无矛盾
 
-### E13b（引擎 · 后续）
+### E13b（引擎）
 
-- [ ] 控制面可插入 marker；导出/载入后帧 `kind=marker` 且 aux 文本一致
-- [ ] 录制中插入：相对戳落在插入时刻附近；重放不向 sink 发送该帧
-- [ ] 自检：写 marker → 读回 aux
+- [x] 控制面可插入 marker；导出/载入后帧 `kind=marker` 且 aux 文本一致
+- [x] 录制中插入：相对戳落在插入时刻附近；重放不向 sink 发送该帧
+- [x] 自检：写 marker → 读回 aux
 
 ### E13c（引擎 · 后续）
 
@@ -108,4 +108,4 @@
 
 ## 建议下一手
 
-E13b：引擎控制面 `session.addMarker`（或等价）+ 自检读回 aux。
+E13c：引擎控制面 `session.trim`（时间窗再基写出新 `.fcap`）+ 自检。

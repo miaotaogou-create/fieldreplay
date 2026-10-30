@@ -560,6 +560,7 @@ pub fn self_check_multi_udp_replay() -> io::Result<()> {
             ],
             &stop_c,
             None,
+            None,
         )
     });
 
@@ -692,6 +693,7 @@ pub fn self_check_multi_udp_replay() -> io::Result<()> {
             ],
             &stop2c,
             None,
+            None,
         )
     });
     thread::sleep(Duration::from_millis(150));
@@ -806,6 +808,7 @@ pub fn self_check_multi_udp_tcp_replay() -> io::Result<()> {
                 },
             ],
             &stop_c,
+            None,
             None,
         )
     });

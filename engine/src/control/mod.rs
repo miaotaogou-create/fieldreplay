@@ -6,6 +6,7 @@ mod hub;
 mod http_static;
 mod json_util;
 mod live;
+mod marker;
 mod replay_live;
 mod server;
 mod session_file;
