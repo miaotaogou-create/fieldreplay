@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | 增强项 E8–E11（含多通道录放 E11a–d）已收口；无默认主线，按现场反馈挑缺口 |
+| **下一步** | E8–E12（含多路 sink E12a–d）已收口；无默认主线，按现场反馈挑缺口（trim/pcap 导入/mTLS/录制暂停等） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -218,4 +218,5 @@ fieldreplay/
 | 2026-10-30 | E7a 收口：`record`/`replay` video + 控制面 `video`\|`video_stream` + UI | self-check 环回；重演页沿用 UDP 目标映射 |
 | 2026-10-30 | E7b 收口：视频 UI 抛光（筛选/重演目标提示/录制文案）+ 手测清单 | 不改引擎热路径；RTSP 仍 E7c/d |
 | 2026-10-30 | 增强项 E10：经典 `.pcap` 导出（合成以太网；UDP/视频/TCP data） | 与表内「E10 seek」编号无关；主交付仍为 `.fcap`；见 `20261030-pcap-export.md` |
-| 2026-10-30 | 增强项 E11a–d：多通道并发录制 + UI 一键录 + 控制面/UI 多目标对齐重放 | 见 `20261030-multi-channel.md`；多路 sink 暂仅 UDP/视频 UDP |
+| 2026-10-30 | 增强项 E11a–d：多通道并发录制 + UI 一键录 + 控制面/UI 多目标对齐重放 | 见 `20261030-multi-channel.md` |
+| 2026-10-30 | 增强项 E12a–d：多路 TCP/串口/MQTT sink + UI 放开 capable | 见 `20261030-multi-sink.md`；多路 RTSP listen 仍单路 |
