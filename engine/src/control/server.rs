@@ -1,5 +1,5 @@
 //! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
-//! E13b：`session.addMarker`。
+//! E13b：`session.addMarker`；E13c：`session.trim`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -25,6 +25,7 @@ use super::replay_live::{
     handle_replay_stop,
 };
 use super::session_file::{export_session_bytes, export_session_pcap_bytes};
+use super::trim::handle_session_trim;
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
     complete_websocket_upgrade, is_websocket_upgrade, read_http_headers, read_text_frame,
@@ -188,6 +189,7 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
         "session.export" => handle_session_export(&id, msg, state),
         "session.exportPcap" => handle_session_export_pcap(&id, state),
         "session.addMarker" => handle_session_add_marker(&id, msg, state),
+        "session.trim" => handle_session_trim(&id, msg, state),
         "record.start" => match state.lock() {
             Ok(mut g) => {
                 g.reap_finished_replay();
@@ -520,6 +522,8 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_replay_loop_via_ws(&mut client, &path)?;
     // E13b：离线插 marker（放在重放自检之后，避免改内存会话干扰）
     self_check_add_marker_via_ws(&mut client, &path)?;
+    // E13c：时间窗 trim（独立多通道样本，不污染后续录制自检）
+    self_check_trim_via_ws(&mut client)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
@@ -610,6 +614,181 @@ fn self_check_add_marker_via_ws(client: &mut TcpStream, session_path: &Path) -> 
     let _ = read_text_frame(client)?;
 
     eprintln!("  控制面 session.addMarker 离线写读：通过");
+    Ok(())
+}
+
+/// E13c：多通道 + marker 会话 → `session.trim` → 读回校验再基与通道表。
+fn self_check_trim_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    let dir = std::env::temp_dir().join("fieldreplay_e13c_trim");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("multi.fcap");
+    {
+        let channels = [
+            ChannelEntry {
+                channel_index: 0,
+                channel_type: ChannelType::Udp,
+                name: "udp0".into(),
+                config_json: r#"{"bind":"127.0.0.1:9"}"#.into(),
+            },
+            ChannelEntry {
+                channel_index: 1,
+                channel_type: ChannelType::Serial,
+                name: "ser1".into(),
+                config_json: r#"{"port_name":"COM9","baud_rate":115200}"#.into(),
+            },
+        ];
+        let mut w = SessionWriter::create(
+            &path,
+            2_000_000,
+            &channels,
+            Some(r#"{"session_title":"e13c","notes":"pre"}"#),
+        )?;
+        for (rel, ch, kind, aux, payload) in [
+            (0u64, 0u16, PacketKind::Data, &b""[..], &b"a"[..]),
+            (10_000, 1, PacketKind::Data, &b""[..], &b"bb"[..]),
+            (20_000, 0, PacketKind::Marker, &b"cut-me"[..], &b""[..]),
+            (40_000, 0, PacketKind::Data, &b""[..], &b"ccc"[..]),
+            (50_000, 1, PacketKind::Data, &b""[..], &b"d"[..]),
+        ] {
+            w.append_packet(&PacketRecord {
+                relative_us: rel,
+                channel_index: ch,
+                kind,
+                direction: 0,
+                flags: 0,
+                aux: aux.to_vec(),
+                payload: payload.to_vec(),
+            })?;
+        }
+        w.finalize()?;
+    }
+
+    let open = format!(
+        r#"{{"id":"e13c0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(&path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 trim 前 open 响应")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("trim 前 session.open 失败: {opened}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13c-bad","cmd":"session.trim","fromUs":40,"toUs":10}"#,
+    )?;
+    let bad = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到非法窗 trim 响应")
+    })?;
+    if bad.contains("\"ok\":true") || !bad.contains("fromUs") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("非法时间窗应失败: {bad}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13c-empty","cmd":"session.trim","fromUs":60000,"toUs":70000}"#,
+    )?;
+    let empty = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到空窗 trim 响应")
+    })?;
+    if empty.contains("\"ok\":true") || !empty.contains("无帧") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("空时间窗应失败: {empty}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"e13c1","cmd":"session.trim","fromUs":10000,"toUs":40000}"#,
+    )?;
+    let trimmed = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 session.trim 响应")
+    })?;
+    if !trimmed.contains("\"ok\":true")
+        || !trimmed.contains("\"trimmed\":true")
+        || !trimmed.contains("\"packetCount\":3")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("session.trim 失败: {trimmed}"),
+        ));
+    }
+    let b64s = extract_str(&trimmed, "b64").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "session.trim 缺 b64")
+    })?;
+    let bytes = b64::decode(&b64s).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("trim b64 无效: {e}"))
+    })?;
+    let mut reader = SessionReader::open_bytes(bytes)?;
+    if reader.header().start_wall_unix_us != 2_010_000 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "墙钟起点未按 fromUs 偏移: {}",
+                reader.header().start_wall_unix_us
+            ),
+        ));
+    }
+    if reader.channels().len() != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("通道表应完整保留 2 路，实际 {}", reader.channels().len()),
+        ));
+    }
+    let packets = reader.read_all_packets()?;
+    if packets.len() != 3 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("trim 后帧数应为 3，实际 {}", packets.len()),
+        ));
+    }
+    if packets[0].relative_us != 0 || packets[0].payload.as_slice() != b"bb" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "trim 后首帧 relative/payload 不符",
+        ));
+    }
+    let marker = packets
+        .iter()
+        .find(|p| p.kind == PacketKind::Marker)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "trim 后缺 marker"))?;
+    if marker.aux.as_slice() != b"cut-me" || marker.relative_us != 10_000 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "marker 再基异常: rel={} aux={:?}",
+                marker.relative_us,
+                String::from_utf8_lossy(&marker.aux)
+            ),
+        ));
+    }
+    if packets.last().map(|p| p.relative_us) != Some(30_000) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "末帧 relative 应为 30000，实际 {:?}",
+                packets.last().map(|p| p.relative_us)
+            ),
+        ));
+    }
+    let meta = reader.meta_json().unwrap_or("");
+    if !meta.contains("trim [10000,40000]") || !meta.contains("pre") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("SessionMeta notes 未追加 trim 说明: {meta}"),
+        ));
+    }
+
+    eprintln!("  控制面 session.trim 再基写读：通过");
     Ok(())
 }
 
@@ -1467,4 +1646,14 @@ fn write_text_frame_client(stream: &mut TcpStream, text: &str) -> io::Result<()>
         out.push(b ^ mask[i % 4]);
     }
     stream.write_all(&out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::self_check_control;
+
+    #[test]
+    fn control_plane_self_check_includes_trim() {
+        self_check_control().expect("控制面自检（含 session.trim）");
+    }
 }

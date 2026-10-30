@@ -10,6 +10,7 @@ mod marker;
 mod replay_live;
 mod server;
 mod session_file;
+mod trim;
 mod sha1;
 mod state;
 mod ws;
