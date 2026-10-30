@@ -1,6 +1,6 @@
 # FieldReplay 引擎
 
-原生录放热路径（Rust；MQTT TLS 用 rustls，其余以标准库为主）。当前完成 **E6a** 及后续增强（含 E9 MQTT 凭据/TLS）：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。桌面窗口见仓库 `shell/`（E6b）。
+原生录放热路径（Rust；MQTT TLS 用 rustls，其余以标准库为主）。当前完成 **E6a** 及后续增强（含 E9 MQTT 凭据/TLS、E10 pcap 导出）：UDP/串口/TCP/MQTT 录放 + 本机 WebSocket 控制面；`serve --ui-dir` 可同端口托管静态 UI。桌面窗口见仓库 `shell/`（E6b）。
 
 格式契约：[`../docs/design/fcap-format.md`](../docs/design/fcap-format.md)。
 
@@ -53,6 +53,9 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883
 fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix lab/
 fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:1883 --mqtt-user field --mqtt-password secret
 fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:8883 --mqtt-tls --mqtt-ca C:\certs\ca.pem
+
+REM 导出经典 pcap（UDP/视频/TCP data；串口与 MQTT 跳过）
+fieldreplay-engine export-pcap --in session.fcap --out session.pcap
 ```
 
 ## 模块
@@ -60,6 +63,7 @@ fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:8883 --mqtt-tls 
 | 模块 | 职责 |
 |------|------|
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
+| `pcap` | 经典 libpcap 导出（合成以太网；E10） |
 | `clock` | 录制相对微秒、重放等待 |
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
 | `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；打开失败可读摘要；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
@@ -83,4 +87,5 @@ cargo run -- self-check
 
 实口/虚口手测步骤见 [`../docs/requirements/20261030-serial-enhance.md`](../docs/requirements/20261030-serial-enhance.md)（一端灌、一端录；重放写对端口）。  
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
-MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。
+MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。  
+pcap：`export-pcap` 或控制面/UI「同时导出 .pcap」；见 `docs/requirements/20261030-pcap-export.md`。

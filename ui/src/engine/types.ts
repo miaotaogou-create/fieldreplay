@@ -113,6 +113,15 @@ export interface EngineSessionExportResult {
   b64: string;
 }
 
+/** E10：经典 pcap 导出 */
+export interface EngineSessionExportPcapResult {
+  exported: boolean;
+  written: number;
+  skipped: number;
+  bytes: number;
+  b64: string;
+}
+
 /** E8a：本机串口枚举 */
 export interface EngineSerialListResult {
   ports: string[];

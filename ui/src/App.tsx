@@ -354,11 +354,15 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
-  const handleExportSession = async (metadata: CaptureSessionMetadata) => {
+  const handleExportSession = async (
+    metadata: CaptureSessionMetadata,
+    options?: { alsoPcap?: boolean }
+  ) => {
     setSessionMetadata(metadata);
     const fileName =
       metadata.sessionTitle || `现场数据捕获包_${Date.now()}.fcap`;
     const engine = engineRef.current;
+    const alsoPcap = Boolean(options?.alsoPcap);
 
     if (engine?.connected) {
       try {
@@ -375,6 +379,33 @@ export default function App() {
         const ab = new ArrayBuffer(bytes.byteLength);
         new Uint8Array(ab).set(bytes);
         downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);
+
+        if (alsoPcap) {
+          try {
+            const pcap = await engine.exportSessionPcapBytes();
+            if (
+              pcap.bytes.length < 4
+              || pcap.bytes[0] !== 0xd4
+              || pcap.bytes[1] !== 0xc3
+              || pcap.bytes[2] !== 0xb2
+              || pcap.bytes[3] !== 0xa1
+            ) {
+              throw new Error('引擎返回内容不是经典 .pcap');
+            }
+            const pcapName = fileName.replace(/\.fcap$/i, '') + '.pcap';
+            const pab = new ArrayBuffer(pcap.bytes.byteLength);
+            new Uint8Array(pab).set(pcap.bytes);
+            downloadBlob(new Blob([pab], { type: 'application/vnd.tcpdump.pcap' }), pcapName);
+            showToast(
+              `已导出 .fcap 与 .pcap（写入 ${pcap.written} 帧，跳过 ${pcap.skipped}）`
+            );
+          } catch (pe) {
+            const pmsg = pe instanceof Error ? pe.message : String(pe);
+            showToast(`已导出 .fcap；pcap 失败：${pmsg}`);
+          }
+          return;
+        }
+
         showToast('已导出真实二进制 .fcap，可直接发给研发重放');
         return;
       } catch (e) {
@@ -382,6 +413,10 @@ export default function App() {
         showToast(`导出失败：${msg}`);
         return;
       }
+    }
+
+    if (alsoPcap) {
+      showToast('离线模式无法导出 pcap，请先连接引擎');
     }
 
     // 引擎未连接：离线演示仍下发 JSON 包（后缀 .fcap，仅供 UI 演示）

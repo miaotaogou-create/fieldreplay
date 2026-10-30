@@ -15,11 +15,12 @@ use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     record_video_to_file, record_video_to_file_with, replay_mqtt_from_file,
     replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
-    replay_video_rtsp_from_file, run_io_acceptance, serial_pair_from_env, serve_control,
-    MiniBroker, MiniRtspServer, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions,
-    Parity, FaultInjection, RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl,
-    SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig,
-    TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND, SERIAL_PAIR_ENV,
+    replay_video_rtsp_from_file, run_io_acceptance, self_check_pcap_export, serial_pair_from_env,
+    serve_control, write_session_pcap, MiniBroker, MiniRtspServer, MqttClient, MqttConfig,
+    MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection, RecordOptions, ReplayOptions,
+    RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort, SerialRecordOptions,
+    SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
+    SERIAL_PAIR_ENV,
 };
 
 fn main() {
@@ -35,6 +36,7 @@ fn run() -> io::Result<()> {
     match cmd.as_str() {
         "record" => cmd_record(args),
         "replay" => cmd_replay(args),
+        "export-pcap" => cmd_export_pcap(args),
         "serve" => cmd_serve(args),
         "self-check" => cmd_self_check(),
         "help" | "-h" | "--help" => {
@@ -72,6 +74,7 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>] \\
                              [--mqtt-user <u>] [--mqtt-password <p>] \\
                              [--mqtt-tls] [--mqtt-ca <pem>] [--mqtt-tls-server-name <名>]
+  fieldreplay-engine export-pcap --in <file.fcap> --out <file.pcap>
   fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
 
@@ -81,9 +84,62 @@ TCP 重放：按文件内录制角色自动取反（server↔client），--tcp �
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）；可选 --mqtt-user/--mqtt-password（E9a）；
 可选 --mqtt-tls / --mqtt-ca / --mqtt-tls-server-name（E9b，常用口 8883）。
 RTSP：录=交织 TCP 拉流（E7c）；重放 --rtsp-listen 作服务端按时间轴吐块（E7d；不解 NAL）。
+export-pcap：将 .fcap 中 UDP/视频/TCP 数据帧导出为经典 .pcap（串口/MQTT 跳过）。
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
     );
+}
+
+fn cmd_export_pcap(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut in_path: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--in" => {
+                in_path = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--in 需要路径"))?
+                        .into(),
+                );
+            }
+            "--out" => {
+                out_path = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--out 需要路径"))?
+                        .into(),
+                );
+            }
+            other => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("未知参数: {other}"),
+                ));
+            }
+        }
+    }
+    let in_path = in_path.ok_or_else(|| err_arg("export-pcap 需要 --in"))?;
+    let out_path = out_path.ok_or_else(|| err_arg("export-pcap 需要 --out"))?;
+    let mut reader = SessionReader::open(&in_path)?;
+    let channels = reader.channels().to_vec();
+    let start = reader.header().start_wall_unix_us;
+    let mut packets = Vec::new();
+    while let Some(pkt) = reader.next_packet()? {
+        packets.push(pkt);
+    }
+    let stats = write_session_pcap(&out_path, start, &channels, &packets)?;
+    eprintln!(
+        "已写出 {}（written={} skipped={}）",
+        out_path.display(),
+        stats.written,
+        stats.skipped
+    );
+    if stats.written == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "无可导出的网络帧（仅串口/MQTT 或无 data 帧）",
+        ));
+    }
+    Ok(())
 }
 
 fn cmd_serve(mut args: impl Iterator<Item = String>) -> io::Result<()> {
@@ -707,6 +763,11 @@ fn cmd_self_check() -> io::Result<()> {
     assert_eq!(r.channels()[3].channel_type, ChannelType::Mqtt);
     assert_eq!(pkts[4].payload, b"mqtt-delta");
     assert_eq!(pkts[4].aux, b"factory/line3/servo");
+    println!("ok");
+
+    print!("self-check: pcap 导出… ");
+    let _ = io::stdout().flush();
+    self_check_pcap_export()?;
     println!("ok");
 
     print!("self-check: UDP 录放环回… ");

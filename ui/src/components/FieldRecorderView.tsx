@@ -37,7 +37,10 @@ interface FieldRecorderViewProps {
   recordedPackets: CapturedPacket[];
   onAppendPacket: (packet: CapturedPacket) => void;
   onClearSession: () => void;
-  onExportSession: (metadata: CaptureSessionMetadata) => void | Promise<void>;
+  onExportSession: (
+    metadata: CaptureSessionMetadata,
+    options?: { alsoPcap?: boolean }
+  ) => void | Promise<void>;
   onGoToReplay: () => void;
   engineConnected: boolean;
   onEngineStartRecord: (channel: ChannelConfig) => Promise<void>;
@@ -80,6 +83,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   const [filterChannel, setFilterChannel] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [alsoExportPcap, setAlsoExportPcap] = useState(false);
   const [showAddChannelModal, setShowAddChannelModal] = useState(false);
 
   // New channel state
@@ -374,7 +378,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       notes: siteNotes,
     };
     setIsExportModalOpen(false);
-    void Promise.resolve(onExportSession(meta));
+    void Promise.resolve(onExportSession(meta, { alsoPcap: alsoExportPcap }));
   };
 
   return (
@@ -844,6 +848,23 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   </span>
                 </div>
               </div>
+
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={alsoExportPcap}
+                  onChange={(e) => setAlsoExportPcap(e.target.checked)}
+                />
+                <span className="text-slate-700">
+                  同时导出 .pcap（供 Wireshark；仅 UDP/视频/TCP 数据帧，串口与 MQTT 会跳过）
+                  {!engineConnected && (
+                    <span className="block text-amber-700 mt-0.5">
+                      需连接引擎后才可导出真实 pcap
+                    </span>
+                  )}
+                </span>
+              </label>
 
               {recordedPackets.length === 0 && (
                 <p className="text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">

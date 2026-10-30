@@ -22,7 +22,7 @@ use super::replay_live::{
     handle_replay_pause, handle_replay_resume, handle_replay_seek, handle_replay_start,
     handle_replay_stop,
 };
-use super::session_file::export_session_bytes;
+use super::session_file::{export_session_bytes, export_session_pcap_bytes};
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
     complete_websocket_upgrade, is_websocket_upgrade, read_http_headers, read_text_frame,
@@ -184,6 +184,7 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             }
         }
         "session.export" => handle_session_export(&id, msg, state),
+        "session.exportPcap" => handle_session_export_pcap(&id, state),
         "record.start" => match state.lock() {
             Ok(mut g) => {
                 g.reap_finished_replay();
@@ -303,6 +304,56 @@ fn handle_session_export(
                     )
                 }
                 Err(e) => err_result(id, &format!("导出失败: {e}")),
+            }
+        }
+        Err(_) => err_result(id, "状态锁损坏"),
+    }
+}
+
+/// 将内存会话写成经典 `.pcap`，经 base64 回传；门禁同 `session.export`。
+fn handle_session_export_pcap(id: &str, state: &Arc<Mutex<ControlState>>) -> String {
+    match state.lock() {
+        Ok(mut g) => {
+            g.reap_finished_replay();
+            if g.recording.is_some() {
+                return err_result(id, "录制中无法导出，请先 record.stop");
+            }
+            if g.replaying.is_some() {
+                return err_result(id, "重放中无法导出，请先 replay.stop");
+            }
+            let Some(session) = g.session.as_ref() else {
+                return err_result(id, "无会话可导出，请先录制或 session.open/load");
+            };
+            if session.packets.is_empty() {
+                return err_result(id, "会话无帧，无法导出");
+            }
+            match export_session_pcap_bytes(session) {
+                Ok((bytes, stats)) => {
+                    if bytes.len() < 4 {
+                        return err_result(id, "导出校验失败：pcap 过短");
+                    }
+                    let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    if magic != crate::pcap::PCAP_MAGIC_USEC {
+                        return err_result(id, "导出校验失败：非 pcap 魔数");
+                    }
+                    if stats.written == 0 {
+                        return err_result(
+                            id,
+                            "无可导出的网络帧（仅串口/MQTT 或无 data 帧时无法生成 pcap）",
+                        );
+                    }
+                    let b64s = b64::encode(&bytes);
+                    ok_result(
+                        id,
+                        &format!(
+                            "{{\"exported\":true,\"written\":{},\"skipped\":{},\"bytes\":{},\"b64\":\"{b64s}\"}}",
+                            stats.written,
+                            stats.skipped,
+                            bytes.len()
+                        ),
+                    )
+                }
+                Err(e) => err_result(id, &format!("pcap 导出失败: {e}")),
             }
         }
         Err(_) => err_result(id, "状态锁损坏"),

@@ -19,6 +19,7 @@ import {
   EngineRpcOk,
   EngineSessionDto,
   EngineSessionExportResult,
+  EngineSessionExportPcapResult,
   EngineSerialListResult,
 } from './types';
 
@@ -175,6 +176,24 @@ export class EngineClient {
   async exportSessionBytes(meta?: Record<string, unknown>): Promise<Uint8Array> {
     const result = await this.exportSession(meta);
     return base64ToBytes(result.b64);
+  }
+
+  /** 导出内存会话为经典 `.pcap`（base64）。 */
+  exportSessionPcap(): Promise<EngineSessionExportPcapResult> {
+    return this.request<EngineSessionExportPcapResult>('session.exportPcap', {});
+  }
+
+  async exportSessionPcapBytes(): Promise<{
+    bytes: Uint8Array;
+    written: number;
+    skipped: number;
+  }> {
+    const result = await this.exportSessionPcap();
+    return {
+      bytes: base64ToBytes(result.b64),
+      written: result.written,
+      skipped: result.skipped,
+    };
   }
 
   startRecord(args: {

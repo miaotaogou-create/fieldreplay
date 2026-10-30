@@ -1,10 +1,11 @@
-//! 内存会话 ↔ 磁盘 `.fcap`（重放物化 / 导出共用）。
+//! 内存会话 ↔ 磁盘 `.fcap`（重放物化 / 导出共用）；pcap 导出亦经此入口。
 
 use std::io;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fcap::SessionWriter;
+use crate::pcap::{session_to_pcap_bytes, PcapExportStats};
 
 use super::state::LoadedSession;
 
@@ -45,4 +46,15 @@ pub fn export_session_bytes(
     let count = session.packets.len() as u64;
     let _ = std::fs::remove_file(&path);
     Ok((bytes, count))
+}
+
+/// 导出经典 `.pcap` 字节（控制面 `session.exportPcap`）。
+pub fn export_session_pcap_bytes(
+    session: &LoadedSession,
+) -> io::Result<(Vec<u8>, PcapExportStats)> {
+    session_to_pcap_bytes(
+        session.start_wall_unix_us,
+        &session.channels,
+        &session.packets,
+    )
 }
