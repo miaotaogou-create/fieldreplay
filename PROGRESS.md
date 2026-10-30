@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | E8–E12（含多路 sink E12a–d）已收口；无默认主线，按现场反馈挑缺口（trim/pcap 导入/mTLS/录制暂停等） |
+| **下一步** | E12 已收口；备选已拆 **E13–E16 / R1**（见下方「阶段 X」）；**现场再挑一条**再开需求文档；无默认主线 |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -126,11 +126,11 @@ fieldreplay/
 | E6b | 薄壳 WebView2 窗口加载本机 UI；启动时拉起/内嵌引擎 serve | [x] | 2026-10-29：`shell/` + wry/tao；拉起 `serve --ui-dir`；Job 连带回收；`cargo run -- --smoke` 通过 |
 | E6c | 绿色目录打包脚本（主 EXE + ui/dist + 引擎） | [x] | 2026-10-29：`tools/pack_green.ps1`（bat 入口）；产物 `pack/FieldReplay/`；脚本内 `--smoke` 通过 |
 | E6d | 双击手测验收 + README/进度本收口 E6 | [x] | 2026-10-29：**通过**（见下方 E6d 清单）；README/需求/架构已收口 |
-| E7 | 视频通道（拆 E7a–E7d） | [~] | 见分项；需求 `docs/requirements/20261030-video.md` |
+| E7 | 视频通道（拆 E7a–E7d） | [x] | 已收口；需求 `docs/requirements/20261030-video.md` |
 | E7a | RTP/UDP 视频通道：录放 + `.fcap` video + 控制面/UI + self-check | [x] | 2026-10-30：复用 UDP 热路径；`media=rtp_udp`；不解编码；UI 可加视频通道；重演 UDP 目标区自动 `video_stream` |
 | E7b | 视频 UI 抛光（重演页目标提示、筛选文案、手测清单） | [x] | 2026-10-30：报文筛选「视频 RTP」+ 详情提示；重演页视频目标区/默认 5004；录制文案去任务号；见下方 E7b 清单 |
-| E7c | 最小 RTSP 客户端拉流（按块落盘，仍不解 NAL） | [ ] | |
-| E7d | 最小 RTSP 服务侧重放 | [ ] | |
+| E7c | 最小 RTSP 客户端拉流（按块落盘，仍不解 NAL） | [x] | 已收口：`media=rtsp_tcp`；迷你服务端自检；控制面/UI/CLI |
+| E7d | 最小 RTSP 服务侧重放 | [x] | 已收口：`mode=rtsp_listen`；PLAY 后按时间轴吐块；多路仍请用单路 |
 | E8 | 引擎重放倍速（`replay.start.speed`） | [x] | 2026-10-30：时钟按倍速缩墙钟；四通道重放 + 控制面 + UI 倍速按钮接通；循环/暂停仍后置 |
 | E9 | 引擎重放真实暂停（`replay.pause` / `resume`） | [x] | 2026-10-30：时钟冻结时间轴；四通道 + 控制面 + UI 暂停/继续；复位仍走 stop；循环/seek 仍后置 |
 | E10 | 引擎重放 seek（`replay.seek` / `fromUs`） | [x] | 2026-10-30：回卷读头 + 校准时钟；播放/暂停中可拖进度条；启动可从当前头起播；循环仍后置 |
@@ -166,11 +166,67 @@ fieldreplay/
 | 录制：添加「视频 RTP」文案无内部任务号 | 通过 | 「RTP/UDP 监听地址（不解编码；RTSP 后置）」 |
 | `npm run lint` | 通过 | `tsc --noEmit` |
 
+### 阶段 X — 备选增强（E12 后；现场再挑一条主线）
+
+> 增强项编号 E8–E12 = 串口 / MQTT 凭据 TLS / pcap 导出 / 多通道 / 多路 sink（与上方早期「重放 E8–E13」编号不同，读全称）。  
+> **选定轨道后**只做该轨道第一格；先需求文档再代码。
+
+| 轨 | 首格 | 内容 |
+|----|------|------|
+| A **E13** trim+marker | E13a | 需求：`session-trim-marker`；非目标含多文件 merge |
+| B **E14** pcap 导入 | E14a | 需求：支持链路与跳过规则；与 E10 往返期望 |
+| C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify |
+| D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 |
+| E **R1** 回归 | R1a | 手测 E12d 多协议；无新功能 |
+
+#### E13 会话 trim + marker
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| E13a | 需求入库（trim 时间窗、marker 时机、验收/非目标） | [ ] |
+| E13b | 引擎：控制面插 `kind=marker` + 自检 | [ ] |
+| E13c | 引擎：时间窗 trim 写出新 `.fcap` + 自检 | [ ] |
+| E13d | UI：插 marker；trim 导出/另存 | [ ] |
+
+#### E14 pcap 导入
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| E14a | 需求入库（链路范围、跳过、往返、非目标） | [ ] |
+| E14b | 引擎：pcap→fcap + 自检 | [ ] |
+| E14c | 控制面 import | [ ] |
+| E14d | UI 载入入口 + 手测 | [ ] |
+
+#### E15 MQTT mTLS
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| E15a | 需求入库（证书路径/控制面 JSON） | [ ] |
+| E15b | 引擎 mTLS 录放 | [ ] |
+| E15c | 控制面 + UI（单路/多路） | [ ] |
+| E15d | mTLS 自检夹具 | [ ] |
+
+#### E16 录制暂停
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| E16a | 需求入库（相对戳策略 + 多路语义） | [ ] |
+| E16b | 引擎 `record.pause`/`resume` | [ ] |
+| E16c | 控制面 + UI | [ ] |
+| E16d | 自检对齐 E16a | [ ] |
+
+#### R1 回归
+
+| ID | 任务 | 状态 |
+|----|------|------|
+| R1a | 手测 E12d：UDP+TCP / UDP+串口 / UDP+MQTT | [ ] |
+| R1b | 按缺陷修并回写进度本 | [ ] |
+
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7c**；或增强项）
+1. 读 `PROGRESS.md` → 若用户已选定 A–E 轨道，只做该轨道 **第一个未勾选** 项；未选定则先问，勿擅自开写
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / **E8–E13** / **E7a+E7b** 已收口；视频分阶段见 `20261030-video.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E12** 已收口；下一主线见「阶段 X」；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -220,3 +276,4 @@ fieldreplay/
 | 2026-10-30 | 增强项 E10：经典 `.pcap` 导出（合成以太网；UDP/视频/TCP data） | 与表内「E10 seek」编号无关；主交付仍为 `.fcap`；见 `20261030-pcap-export.md` |
 | 2026-10-30 | 增强项 E11a–d：多通道并发录制 + UI 一键录 + 控制面/UI 多目标对齐重放 | 见 `20261030-multi-channel.md` |
 | 2026-10-30 | 增强项 E12a–d：多路 TCP/串口/MQTT sink + UI 放开 capable | 见 `20261030-multi-sink.md`；多路 RTSP listen 仍单路 |
+| 2026-10-30 | E12 后无默认主线；备选拆为 E13 trim+marker / E14 pcap 导入 / E15 MQTT mTLS / E16 录制暂停 / R1 回归 | 现场再挑一条；先需求文档再代码；编号续增强项序列，勿与早期重放 E8–E13 混读 |
