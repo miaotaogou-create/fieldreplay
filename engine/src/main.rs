@@ -13,8 +13,9 @@ use fieldreplay_engine::fcap::{
 };
 use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
-    record_video_to_file, replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file,
-    replay_udp_from_file, replay_video_from_file, run_io_acceptance, serve_control, MiniBroker,
+    record_video_to_file, record_video_to_file_with, replay_mqtt_from_file,
+    replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
+    run_io_acceptance, serve_control, MiniBroker, MiniRtspServer,
     MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
     RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions,
     TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
@@ -60,6 +61,7 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
                              [--duration <秒>]
   fieldreplay-engine record  --mqtt <host:port> --topic <filter> [--qos 0|1|2] \\
                              --out <file.fcap> [--duration <秒>]
+  fieldreplay-engine record  --rtsp <rtsp://host[:port]/path> --out <file.fcap> [--duration <秒>]
   fieldreplay-engine replay  --in <file.fcap> --target <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
@@ -68,9 +70,10 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
---bind / --port / --tcp / --mqtt 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
+--bind / --port / --tcp / --mqtt / --rtsp 互斥；replay 的 --target / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
+RTSP：录=交织 TCP 拉流（E7c；不解 NAL）；重放仍走 UDP 目标（E7d 再做 RTSP 服务端）。
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
     );
@@ -120,6 +123,7 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut mqtt_endpoint: Option<SocketAddr> = None;
     let mut mqtt_topic: Option<String> = None;
     let mut mqtt_qos: u8 = 0;
+    let mut rtsp_url: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
     let mut stop_bits: u8 = 1;
@@ -177,6 +181,12 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                     .filter(|q| *q <= 2)
                     .ok_or_else(|| err_arg("--qos 须为 0|1|2"))?;
             }
+            "--rtsp" => {
+                rtsp_url = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--rtsp 需要 rtsp:// URL"))?,
+                );
+            }
             "--baud" => {
                 let v = args.next().ok_or_else(|| err_arg("--baud 需要数值"))?;
                 baud = v
@@ -228,12 +238,13 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         port_name.is_some(),
         tcp_endpoint.is_some() || tcp_role.is_some(),
         mqtt_endpoint.is_some() || mqtt_topic.is_some(),
+        rtsp_url.is_some(),
     ]
     .iter()
     .filter(|&&x| x)
     .count();
     if modes > 1 {
-        return Err(err_arg("--bind / --port / --tcp / --mqtt 不能同时使用"));
+        return Err(err_arg("--bind / --port / --tcp / --mqtt / --rtsp 不能同时使用"));
     }
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -304,7 +315,21 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         return Err(err_arg("MQTT 录制需要 --mqtt <host:port>"));
     }
 
-    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind、--port、--tcp 或 --mqtt"))?;
+    if let Some(url) = rtsp_url {
+        let opts = RecordOptions {
+            bind: "0.0.0.0:0".parse().unwrap(),
+            out_path: out,
+            channel_name: "video-rtsp".into(),
+            session_title: Some("record-rtsp".into()),
+            max_duration: duration,
+            poll_timeout: Duration::from_millis(200),
+        };
+        let n = record_video_to_file_with(&opts, Some(&url), &stop, &mut None)?;
+        println!("ok packets={n}");
+        return Ok(());
+    }
+
+    let port_name = port_name.ok_or_else(|| err_arg("缺少 --bind、--port、--tcp、--mqtt 或 --rtsp"))?;
     let config = SerialConfig {
         port_name: port_name.clone(),
         baud,
@@ -590,6 +615,11 @@ fn cmd_self_check() -> io::Result<()> {
     video_loopback_check()?;
     println!("ok");
 
+    print!("self-check: 视频(RTSP 交织) 拉流录制… ");
+    let _ = io::stdout().flush();
+    video_rtsp_loopback_check()?;
+    println!("ok");
+
     print!("self-check: 串口内存环回录放… ");
     let _ = io::stdout().flush();
     serial_loopback_check()?;
@@ -821,6 +851,135 @@ fn video_loopback_check() -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("视频载荷不一致: {got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// E7c：迷你 RTSP 服务端 → 客户端交织拉流 → 写盘；载荷一致且 media=rtsp_tcp。
+fn video_rtsp_loopback_check() -> io::Result<()> {
+    use std::thread;
+
+    let server = MiniRtspServer::start(vec![b"rtp-rtsp-1".to_vec(), b"rtp-rtsp-2".to_vec()])?;
+    let url = server.url("/live");
+    thread::sleep(Duration::from_millis(40));
+
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_rtsp_loop_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+    let url_rec = url.clone();
+
+    let recorder = thread::spawn(move || {
+        let opts = RecordOptions {
+            bind: "0.0.0.0:0".parse().unwrap(),
+            out_path: fcap2,
+            channel_name: "video-rtsp".into(),
+            session_title: Some("video-rtsp".into()),
+            max_duration: Some(Duration::from_secs(3)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        let mut none = None;
+        record_video_to_file_with(&opts, Some(&url_rec), &stop_rec, &mut none)
+    });
+
+    // 等服务端吐完两块
+    thread::sleep(Duration::from_millis(400));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder
+        .join()
+        .map_err(|_| err_arg("RTSP 录制线程 panic"))??;
+    server.stop();
+
+    if n < 2 {
+        let _ = std::fs::remove_file(&fcap);
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("RTSP 录制帧数不足: {n}"),
+        ));
+    }
+
+    {
+        let mut r = SessionReader::open(&fcap)?;
+        if r.channels().len() != 1 || r.channels()[0].channel_type != ChannelType::Video {
+            let _ = std::fs::remove_file(&fcap);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "RTSP 会话通道类型应为 video",
+            ));
+        }
+        if !r.channels()[0].config_json.contains("rtsp_tcp") {
+            let _ = std::fs::remove_file(&fcap);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "RTSP 视频 config 应含 media=rtsp_tcp",
+            ));
+        }
+        let mut payloads = Vec::new();
+        while let Some(pkt) = r.next_packet()? {
+            if pkt.kind == PacketKind::Data {
+                payloads.push(pkt.payload);
+            }
+        }
+        if payloads.len() < 2 || payloads[0] != b"rtp-rtsp-1" || payloads[1] != b"rtp-rtsp-2" {
+            let _ = std::fs::remove_file(&fcap);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("RTSP 载荷不一致: {payloads:?}"),
+            ));
+        }
+    }
+
+    // 重放仍走 UDP 目标（E7d 前）
+    let recv_sock = std::net::UdpSocket::bind("127.0.0.1:0")?;
+    let recv_addr = recv_sock.local_addr()?;
+    recv_sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let listener = thread::spawn(move || -> io::Result<Vec<Vec<u8>>> {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 2048];
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while out.len() < 2 && Instant::now() < deadline {
+            match recv_sock.recv_from(&mut buf) {
+                Ok((n, _)) => out.push(buf[..n].to_vec()),
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    });
+
+    let sent = replay_video_from_file(&ReplayOptions {
+        in_path: fcap.clone(),
+        target: recv_addr,
+        local_bind: "127.0.0.1:0".parse().unwrap(),
+        speed: 1.0,
+        fault: FaultInjection::OFF,
+        looping: false,
+    })?;
+    let got = listener
+        .join()
+        .map_err(|_| err_arg("RTSP 重放接收线程 panic"))??;
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 2 || got.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("RTSP→UDP 重放不足: sent={sent} got={}", got.len()),
+        ));
+    }
+    if got[0] != b"rtp-rtsp-1" || got[1] != b"rtp-rtsp-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("RTSP→UDP 载荷不一致: {got:?}"),
         ));
     }
     Ok(())

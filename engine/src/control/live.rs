@@ -245,8 +245,14 @@ fn run_record(
             record_mqtt_to_file_with(&opts, stop, &mut on)
         }
         "video" | "video_stream" => {
-            let bind = parse_udp_bind(config)?;
             let rtsp = extract_str(config, "rtsp_url").or_else(|| extract_str(config, "streamUrl"));
+            let has_rtsp = rtsp.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            // E7c：有 RTSP URL 时 bind 仅写入 config 备注，缺省 0.0.0.0:0
+            let bind = if has_rtsp {
+                parse_udp_bind(config).unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap())
+            } else {
+                parse_udp_bind(config)?
+            };
             let opts = RecordOptions {
                 bind,
                 out_path: out.clone(),

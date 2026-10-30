@@ -38,7 +38,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| Channel | UDP / Serial / TCP / MQTT / Video(E7a=RTP·UDP) 的打开、读写、关闭；TCP 含 role；MQTT 含 broker/topic/QoS |
+| Channel | UDP / Serial / TCP / MQTT / Video(E7a=RTP·UDP；E7c=RTSP 交织拉流) 的打开、读写、关闭；TCP 含 role；MQTT 含 broker/topic/QoS |
 | Clock | 录制起点、相对微秒时间戳 |
 | SessionWriter / Reader | `.fcap`（或确定后的格式）顺序写、顺序/索引读 |
 | Scheduler | 重放按 `relative_us` 发事件 |

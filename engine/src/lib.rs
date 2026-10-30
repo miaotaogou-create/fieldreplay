@@ -1,4 +1,4 @@
-//! FieldReplay 原生录放引擎库：`.fcap` 读写、UDP/视频(RTP·UDP)/串口/TCP/MQTT 通道、录制与时间轴重放。
+//! FieldReplay 原生录放引擎库：`.fcap` 读写、UDP/视频(RTP·UDP|RTSP)/串口/TCP/MQTT 通道、录制与时间轴重放。
 
 pub mod clock;
 pub mod control;
@@ -7,6 +7,7 @@ pub mod io_accept;
 pub mod mqtt;
 pub mod record;
 pub mod replay;
+pub mod rtsp;
 pub mod serial;
 pub mod tcp;
 pub mod udp;
@@ -22,6 +23,7 @@ pub use mqtt::{
     apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, pack_mqtt_flags, MiniBroker,
     MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
 };
+pub use rtsp::{MiniRtspServer, RtspClient, RtspUrl};
 pub use record::{
     record_mqtt_to_file, record_mqtt_to_file_with, record_serial_to_file,
     record_serial_to_file_with, record_serial_with_port, record_serial_with_port_with,

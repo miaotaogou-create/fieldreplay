@@ -233,7 +233,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     const isMqtt = newChanType === 'mqtt';
     const isSerial = newChanType === 'serial';
     const isVideo = newChanType === 'video_stream';
-    const hostPort = newChanParam.includes(':')
+    const paramTrim = newChanParam.trim();
+    const isRtsp = isVideo && paramTrim.toLowerCase().startsWith('rtsp://');
+    const hostPort = !isRtsp && newChanParam.includes(':')
       ? newChanParam.split(':')
       : [isVideo ? '0.0.0.0' : '127.0.0.1', newChanParam];
     const listenIp = hostPort[0]?.trim() || (isVideo ? '0.0.0.0' : '127.0.0.1');
@@ -247,8 +249,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       params: {
         portName: isSerial ? newChanParam.split(',')[0]?.trim() || 'COM4' : undefined,
         baudRate: isSerial ? 921600 : undefined,
-        ip: !isSerial && !isMqtt ? listenIp : undefined,
-        port: !isSerial && !isMqtt ? listenPort : undefined,
+        ip: !isSerial && !isMqtt ? (isRtsp ? '0.0.0.0' : listenIp) : undefined,
+        port: !isSerial && !isMqtt ? (isRtsp ? 0 : listenPort) : undefined,
+        streamUrl: isRtsp ? paramTrim : undefined,
         mqttBroker: isMqtt ? (newChanParam.split(',')[0]?.trim() || '127.0.0.1:1883') : undefined,
         mqttTopic: isMqtt ? (newChanParam.split(',')[1]?.trim() || 'factory/+/telemetry') : undefined,
         mqttQoS: isMqtt ? 1 : undefined,
@@ -398,7 +401,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   {chan.type === 'tcp' && `TCP :${chan.params.port ?? 9000} (${chan.params.role ?? 'svr'})`}
                   {chan.type === 'mqtt' && `MQTT ${chan.params.mqttTopic ?? '#'}`}
                   {chan.type === 'video_stream'
-                    && `RTP ${chan.params.ip ?? '0.0.0.0'}:${chan.params.port ?? 5004}`}
+                    && (chan.params.streamUrl
+                      ? `RTSP ${chan.params.streamUrl}`
+                      : `RTP ${chan.params.ip ?? '0.0.0.0'}:${chan.params.port ?? 5004}`)}
                 </div>
               </div>
             ))}
@@ -865,7 +870,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   : newChanType === 'mqtt'
                   ? 'Broker 与 Topic'
                   : newChanType === 'video_stream'
-                  ? 'RTP/UDP 监听地址（不解编码；RTSP 后置）'
+                  ? 'RTP/UDP 监听或 RTSP URL（不解编码）'
                   : '监听地址'}
               </label>
               <input
@@ -878,7 +883,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                     : newChanType === 'mqtt'
                     ? '127.0.0.1:1883, factory/+/telemetry'
                     : newChanType === 'video_stream'
-                    ? '0.0.0.0:5004'
+                    ? '0.0.0.0:5004 或 rtsp://host:554/live'
                     : '0.0.0.0:8888'
                 }
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 focus:bg-white"

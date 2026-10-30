@@ -1,4 +1,4 @@
-//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 视频·RTP·UDP / 串口 / TCP / MQTT）。
+//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 视频·RTP·UDP|RTSP / 串口 / TCP / MQTT）。
 
 use std::io;
 use std::net::SocketAddr;
@@ -12,6 +12,7 @@ use crate::fcap::{
     ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionWriter,
 };
 use crate::mqtt::{pack_mqtt_flags, MqttClient, MqttConfig};
+use crate::rtsp::{RtspClient, RtspUrl};
 use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{
     accept_until, connect, listen, peer_aux as tcp_peer_aux, read_some, ReadOutcome, TcpConfig,
@@ -59,7 +60,7 @@ pub fn record_udp_to_file_with(
     record_datagram_to_file_with(opts, ChannelType::Udp, None, stop, on_packet)
 }
 
-/// 视频通道（E7a）：UDP 数据报热路径，通道类型写 `video`；`rtsp_url` 仅进 config 备注。
+/// 视频通道：无 `rtsp_url` → E7a RTP/UDP；有 URL → E7c 交织 TCP 拉流（仍不解编码）。
 pub fn record_video_to_file(opts: &RecordOptions, stop: &AtomicBool) -> io::Result<u64> {
     let mut none: OnPacket<'_> = None;
     record_video_to_file_with(opts, None, stop, &mut none)
@@ -71,7 +72,79 @@ pub fn record_video_to_file_with(
     stop: &AtomicBool,
     on_packet: &mut OnPacket<'_>,
 ) -> io::Result<u64> {
-    record_datagram_to_file_with(opts, ChannelType::Video, rtsp_url, stop, on_packet)
+    if let Some(url) = rtsp_url.map(str::trim).filter(|s| !s.is_empty()) {
+        record_rtsp_to_file_with(opts, url, stop, on_packet)
+    } else {
+        record_datagram_to_file_with(opts, ChannelType::Video, None, stop, on_packet)
+    }
+}
+
+fn record_rtsp_to_file_with(
+    opts: &RecordOptions,
+    rtsp_url: &str,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
+    let parsed = RtspUrl::parse(rtsp_url)?;
+    let clock = SessionClock::start();
+    let config_json = format!(
+        r#"{{"bind_ip":"{}","bind_port":{},"peer_ip":"","peer_port":0,"media":"rtsp_tcp","rtsp_url":{}}}"#,
+        opts.bind.ip(),
+        opts.bind.port(),
+        json_string(rtsp_url)
+    );
+    let channels = [ChannelEntry {
+        channel_index: 0,
+        channel_type: ChannelType::Video,
+        name: opts.channel_name.clone(),
+        config_json,
+    }];
+    let meta = opts.session_title.as_ref().map(|t| {
+        format!(r#"{{"session_title":{}}}"#, json_string(t))
+    });
+
+    let mut writer = SessionWriter::create(
+        &opts.out_path,
+        clock.start_wall_unix_us(),
+        &channels,
+        meta.as_deref(),
+    )?;
+
+    eprintln!(
+        "录制中（视频·RTSP 交织）：{} → {}",
+        parsed.request_uri(),
+        opts.out_path.display()
+    );
+
+    let mut client = RtspClient::open(&parsed, opts.poll_timeout)?;
+    while !stop.load(Ordering::SeqCst) {
+        if let Some(max) = opts.max_duration {
+            if clock.relative_us() >= max.as_micros() as u64 {
+                break;
+            }
+        }
+        match client.poll_rtp(stop)? {
+            Some(payload) => {
+                let pkt = PacketRecord {
+                    relative_us: clock.relative_us(),
+                    channel_index: 0,
+                    kind: PacketKind::Data,
+                    direction: 0, // RX
+                    flags: 0,
+                    aux: b"rtsp".to_vec(),
+                    payload,
+                };
+                write_packet(&mut writer, &pkt, on_packet)?;
+            }
+            None => continue,
+        }
+    }
+    client.teardown();
+
+    let count = writer.packet_count();
+    writer.finalize()?;
+    eprintln!("录制结束：{count} 帧 → {}", opts.out_path.display());
+    Ok(count)
 }
 
 fn record_datagram_to_file_with(

@@ -41,15 +41,17 @@ export function channelToEngineConfig(ch: ChannelConfig): Record<string, unknown
         qos: ch.params.mqttQoS ?? 0,
       };
     }
-    case 'video_stream':
+    case 'video_stream': {
+      const rtsp = (ch.params.streamUrl || '').trim();
       return {
         bind_ip: ch.params.ip || '0.0.0.0',
-        bind_port: ch.params.port ?? 5004,
+        bind_port: ch.params.port ?? (rtsp ? 0 : 5004),
         peer_ip: '',
         peer_port: 0,
-        media: 'rtp_udp',
-        rtsp_url: ch.params.streamUrl || '',
+        media: rtsp ? 'rtsp_tcp' : 'rtp_udp',
+        rtsp_url: rtsp,
       };
+    }
     default:
       throw new Error(`通道类型 ${ch.type} 暂不支持引擎录制`);
   }

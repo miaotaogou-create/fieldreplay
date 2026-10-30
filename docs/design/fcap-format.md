@@ -99,7 +99,7 @@
 | 2 | `serial` | 是 |
 | 3 | `tcp` | 是 |
 | 4 | `mqtt` | 是（紧接 MVP） |
-| 5 | `video` | E7a：RTP/UDP 原始数据报；RTSP 信令后置（见 `docs/requirements/20261030-video.md`） |
+| 5 | `video` | E7a：RTP/UDP；E7c：RTSP 交织 TCP 拉流块（见 `docs/requirements/20261030-video.md`） |
 | 0, 6..255 | 保留 | 读到未知类型：跳过该通道帧或整文件报错（实现选一，须文档化） |
 
 ### `config_json`（建议键，均可选）
@@ -132,7 +132,7 @@
 { "broker": "192.168.1.10", "port": 1883, "topic": "factory/line3/#", "qos": 0 }
 ```
 
-**视频（E7a：RTP/UDP）**
+**视频（E7a：RTP/UDP；E7c：RTSP）**
 
 ```json
 {
@@ -145,7 +145,11 @@
 }
 ```
 
-`media`：E7a 为 `"rtp_udp"`（按 UDP 数据报录放，不解 RTP/H.264）。`rtsp_url` 可选，仅备注；E7c 前不参与 IO。
+`media`：
+- `"rtp_udp"`（E7a）：按 UDP 数据报录放，不解 RTP/H.264。
+- `"rtsp_tcp"`（E7c）：录制时对 `rtsp_url` 做最小 RTSP 客户端（交织 TCP），每块原始字节落盘；重放暂仍按 UDP 发往目标（E7d 再做 RTSP 服务端）。
+
+`rtsp_url`：非空则走 E7c 拉流；空则走 E7a bind 收包。
 
 > ponytail: 配置用 JSON 避免 v1 堆一堆 TLV；上限是解析略重、非零拷贝。若热路径证明不够，再升 typed TLV，版本号升 v2。
 
