@@ -78,6 +78,17 @@ export interface EngineRecordStopResult {
   warning?: string;
 }
 
+/** E16c：与 replay.pause 同形 */
+export interface EngineRecordPauseResult {
+  paused: boolean;
+  already?: boolean;
+}
+
+export interface EngineRecordResumeResult {
+  paused: boolean;
+  already?: boolean;
+}
+
 export interface EngineReplaySkippedChannel {
   ch: number;
   type: string;

@@ -212,7 +212,7 @@ fieldreplay/
 |----|------|------|----------|
 | E16a | 需求入库（相对戳策略 + 多路语义） | [x] | 2026-10-30：`docs/requirements/20261030-record-pause.md`；拍板相对戳冻结；整会话暂停；连接保持并排空不落盘 |
 | E16b | 引擎 `record.pause`/`resume` | [x] | 2026-10-30：`SessionClock` 冻结；multi_record 暂停排空不落盘；控制面 pause/resume + status.paused；WS 自检相对戳连续 |
-| E16c | 控制面 + UI | [ ] | status.paused 已在 E16b 露出；本格接录制页真实暂停 |
+| E16c | 控制面 + UI | [x] | 2026-10-30：录制页接通 `record.pause`/`resume`；去掉「暂不支持」；暂停中可插 marker；`npm run build` 通过 |
 | E16d | 自检对齐 E16a | [ ] | |
 
 #### R1 回归
@@ -224,9 +224,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 当前主线 **E16 录制暂停**；只做 **第一个未勾选** 项（现为 **E16c**）
+1. 读 `PROGRESS.md` → 当前主线 **E16 录制暂停**；只做 **第一个未勾选** 项（现为 **E16d**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16a–b** 已收口；规格见 `docs/requirements/20261030-record-pause.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 仍待命
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16a–c** 已收口；规格见 `docs/requirements/20261030-record-pause.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 仍待命
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -285,3 +285,4 @@ fieldreplay/
 | 2026-10-30 | R1 收口（R1a 通过 / R1b 无缺陷跳过） | self-check + UI targets 自检 + 文案核对；下一主线再次现场选定（E15/E16） |
 | 2026-10-30 | **选定 E16** 录制暂停；E16a 需求入库 | 相对戳**冻结**（对齐 replay.pause）；整会话；连接保持排空不落盘；E15 缺客户 mTLS 场景且 E9b 已覆盖常见 mqtts；UI 已有暂停缺口 |
 | 2026-10-30 | E16b 引擎收口：`record.pause`/`resume` + 时钟冻结 + WS 自检 | `SessionClock` 共享暂停态；multi_record 排空不落盘；status.recording.paused；下一格 E16c UI |
+| 2026-10-30 | E16c UI 收口：录制页真实 pause/resume | 去掉「暂不支持」；继续走 `record.resume`（不再误调 start）；暂停中可插 marker；下一格 E16d |

@@ -261,6 +261,26 @@ export default function App() {
     return result;
   };
 
+  const handleEnginePauseRecord = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.pauseRecord();
+    showToast(result.already ? '已处于暂停' : '录制已暂停');
+    return result;
+  };
+
+  const handleEngineResumeRecord = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.resumeRecord();
+    showToast(result.already ? '已在录制' : '录制已继续');
+    return result;
+  };
+
   const handleEngineStartReplay = async (req: EngineStartReplayRequest) => {
     const engine = engineRef.current;
     if (!engine?.connected) {
@@ -729,6 +749,8 @@ export default function App() {
             engineConnected={engineState === 'connected'}
             onEngineStartRecord={handleEngineStartRecord}
             onEngineStopRecord={handleEngineStopRecord}
+            onEnginePauseRecord={handleEnginePauseRecord}
+            onEngineResumeRecord={handleEngineResumeRecord}
             onListSerialPorts={handleListSerialPorts}
             onAddMarkerLive={handleAddMarkerLive}
           />

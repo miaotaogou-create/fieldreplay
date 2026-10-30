@@ -47,9 +47,12 @@ interface FieldRecorderViewProps {
   engineConnected: boolean;
   onEngineStartRecord: (channels: ChannelConfig[]) => Promise<void>;
   onEngineStopRecord: () => Promise<unknown>;
+  /** E16c：录制暂停 / 继续（相对轴冻结） */
+  onEnginePauseRecord?: () => Promise<unknown>;
+  onEngineResumeRecord?: () => Promise<unknown>;
   /** E8a：向引擎枚举本机 COM */
   onListSerialPorts?: () => Promise<string[]>;
-  /** E13d：录制中热插 marker（省略 relativeUs） */
+  /** E13d：录制中热插 marker（省略 relativeUs）；暂停中亦允许 */
   onAddMarkerLive?: (text: string) => void | Promise<void>;
 }
 
@@ -67,6 +70,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   engineConnected,
   onEngineStartRecord,
   onEngineStopRecord,
+  onEnginePauseRecord,
+  onEngineResumeRecord,
   onListSerialPorts,
   onAddMarkerLive,
 }) => {
@@ -252,12 +257,46 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     setRecordState('recording');
   };
 
-  const handlePauseRecord = () => {
+  const handlePauseRecord = async () => {
     if (engineConnected) {
-      setLocalHint('真实引擎录制暂不支持暂停，请直接停止');
+      if (!onEnginePauseRecord) {
+        setLocalHint('引擎暂停接口未接线');
+        return;
+      }
+      setBusy(true);
+      setLocalHint(null);
+      try {
+        await onEnginePauseRecord();
+        setRecordState('paused');
+      } catch (e) {
+        setLocalHint(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
       return;
     }
     setRecordState('paused');
+  };
+
+  const handleResumeRecord = async () => {
+    if (engineConnected) {
+      if (!onEngineResumeRecord) {
+        setLocalHint('引擎继续接口未接线');
+        return;
+      }
+      setBusy(true);
+      setLocalHint(null);
+      try {
+        await onEngineResumeRecord();
+        setRecordState('recording');
+      } catch (e) {
+        setLocalHint(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    setRecordState('recording');
   };
 
   const handleStopAndPackage = async () => {
@@ -486,7 +525,11 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 {chan.enabled && (
                   <div className="text-[10px] text-slate-600 font-mono pl-5 mt-0.5">
                     {packetCountByChannel[chan.id] ?? 0} 帧
-                    {recordState === 'recording' ? ' · 录制中' : ''}
+                    {recordState === 'recording'
+                      ? ' · 录制中'
+                      : recordState === 'paused'
+                      ? ' · 已暂停'
+                      : ''}
                   </div>
                 )}
               </div>
@@ -547,13 +590,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               <>
                 {recordState === 'recording' ? (
                   <button
-                    onClick={handlePauseRecord}
-                    disabled={busy || engineConnected}
-                    title={
-                      engineConnected
-                        ? '真实录制暂不支持暂停'
-                        : undefined
-                    }
+                    onClick={() => void handlePauseRecord()}
+                    disabled={busy}
+                    title="暂停录制（相对时间轴冻结，连接保持）"
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition-colors"
                   >
                     <Pause className="w-3.5 h-3.5 text-amber-400" />
@@ -561,8 +600,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   </button>
                 ) : (
                   <button
-                    onClick={() => void handleStartRecord()}
+                    onClick={() => void handleResumeRecord()}
                     disabled={busy}
+                    title="继续录制"
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
                   >
                     <Play className="w-3.5 h-3.5" />
@@ -570,7 +610,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   </button>
                 )}
 
-                {engineConnected && onAddMarkerLive && recordState === 'recording' && (
+                {engineConnected
+                  && onAddMarkerLive
+                  && (recordState === 'recording' || recordState === 'paused') && (
                   <div className="flex items-center gap-1.5">
                     <input
                       type="text"

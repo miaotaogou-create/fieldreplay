@@ -10,6 +10,8 @@ import {
   EnginePushEvent,
   EngineRecordStartResult,
   EngineRecordStopResult,
+  EngineRecordPauseResult,
+  EngineRecordResumeResult,
   EngineReplayPauseResult,
   EngineReplayResumeResult,
   EngineReplaySeekResult,
@@ -217,6 +219,15 @@ export class EngineClient {
 
   stopRecord(): Promise<EngineRecordStopResult> {
     return this.request<EngineRecordStopResult>('record.stop', {});
+  }
+
+  /** E16c：录制暂停（相对轴冻结） */
+  pauseRecord(): Promise<EngineRecordPauseResult> {
+    return this.request<EngineRecordPauseResult>('record.pause', {});
+  }
+
+  resumeRecord(): Promise<EngineRecordResumeResult> {
+    return this.request<EngineRecordResumeResult>('record.resume', {});
   }
 
   startReplay(args: {
