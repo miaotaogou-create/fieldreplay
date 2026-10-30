@@ -1,4 +1,4 @@
-//! FieldReplay 原生录放引擎库：`.fcap` 读写、UDP/串口/TCP/MQTT 通道、录制与时间轴重放。
+//! FieldReplay 原生录放引擎库：`.fcap` 读写、UDP/视频(RTP·UDP)/串口/TCP/MQTT 通道、录制与时间轴重放。
 
 pub mod clock;
 pub mod control;
@@ -26,12 +26,13 @@ pub use record::{
     record_mqtt_to_file, record_mqtt_to_file_with, record_serial_to_file,
     record_serial_to_file_with, record_serial_with_port, record_serial_with_port_with,
     record_tcp_to_file, record_tcp_to_file_with, record_udp_to_file, record_udp_to_file_with,
-    MqttRecordOptions, OnPacket, RecordOptions, SerialRecordOptions, TcpRecordOptions,
+    record_video_to_file, record_video_to_file_with, MqttRecordOptions, OnPacket, RecordOptions,
+    SerialRecordOptions, TcpRecordOptions,
 };
 pub use replay::{
     apply_fault, replay_mqtt_from_file, replay_serial_from_file, replay_serial_with_port,
-    replay_tcp_from_file, replay_udp_from_file, FaultInjection, FaultRng, MqttReplayOptions,
-    ReplayOptions, SerialReplayOptions, TcpReplayOptions,
+    replay_tcp_from_file, replay_udp_from_file, replay_video_from_file, FaultInjection, FaultRng,
+    MqttReplayOptions, ReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
 pub use serial::{Parity, SerialConfig, SerialPort};
 pub use tcp::{TcpConfig, TcpRole};

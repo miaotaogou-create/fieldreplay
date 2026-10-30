@@ -12,8 +12,8 @@ use crate::fcap::{ChannelType, PacketRecord, SessionReader};
 use crate::mqtt::MqttConfig;
 use crate::record::{
     record_mqtt_to_file_with, record_serial_to_file_with, record_tcp_to_file_with,
-    record_udp_to_file_with, MqttRecordOptions, OnPacket, RecordOptions, SerialRecordOptions,
-    TcpRecordOptions,
+    record_udp_to_file_with, record_video_to_file_with, MqttRecordOptions, OnPacket, RecordOptions,
+    SerialRecordOptions, TcpRecordOptions,
 };
 use crate::serial::{Parity, SerialConfig};
 use crate::tcp::{TcpConfig, TcpRole};
@@ -244,6 +244,19 @@ fn run_record(
             };
             record_mqtt_to_file_with(&opts, stop, &mut on)
         }
+        "video" | "video_stream" => {
+            let bind = parse_udp_bind(config)?;
+            let rtsp = extract_str(config, "rtsp_url").or_else(|| extract_str(config, "streamUrl"));
+            let opts = RecordOptions {
+                bind,
+                out_path: out.clone(),
+                channel_name: name.to_string(),
+                session_title: title_owned,
+                max_duration: None,
+                poll_timeout: poll,
+            };
+            record_video_to_file_with(&opts, rtsp.as_deref(), stop, &mut on)
+        }
         other => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("不支持的通道类型: {other}"),
@@ -257,6 +270,7 @@ fn parse_channel_type(ty: &str) -> io::Result<ChannelType> {
         "serial" => Ok(ChannelType::Serial),
         "tcp" => Ok(ChannelType::Tcp),
         "mqtt" => Ok(ChannelType::Mqtt),
+        "video" | "video_stream" => Ok(ChannelType::Video),
         other => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("未知 type: {other}"),

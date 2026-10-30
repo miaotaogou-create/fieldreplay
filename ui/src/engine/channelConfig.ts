@@ -41,6 +41,15 @@ export function channelToEngineConfig(ch: ChannelConfig): Record<string, unknown
         qos: ch.params.mqttQoS ?? 0,
       };
     }
+    case 'video_stream':
+      return {
+        bind_ip: ch.params.ip || '0.0.0.0',
+        bind_port: ch.params.port ?? 5004,
+        peer_ip: '',
+        peer_port: 0,
+        media: 'rtp_udp',
+        rtsp_url: ch.params.streamUrl || '',
+      };
     default:
       throw new Error(`通道类型 ${ch.type} 暂不支持引擎录制`);
   }
@@ -54,7 +63,8 @@ export function pickRecordChannel(channels: ChannelConfig[]): ChannelConfig | nu
         && (c.type === 'udp'
           || c.type === 'serial'
           || c.type === 'tcp'
-          || c.type === 'mqtt')
+          || c.type === 'mqtt'
+          || c.type === 'video_stream')
     ) ?? null
   );
 }

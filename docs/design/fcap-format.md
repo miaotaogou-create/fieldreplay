@@ -99,7 +99,7 @@
 | 2 | `serial` | 是 |
 | 3 | `tcp` | 是 |
 | 4 | `mqtt` | 是（紧接 MVP） |
-| 5 | `video` | 后置；v1 可读但可忽略重放 |
+| 5 | `video` | E7a：RTP/UDP 原始数据报；RTSP 信令后置（见 `docs/requirements/20261030-video.md`） |
 | 0, 6..255 | 保留 | 读到未知类型：跳过该通道帧或整文件报错（实现选一，须文档化） |
 
 ### `config_json`（建议键，均可选）
@@ -131,6 +131,21 @@
 ```json
 { "broker": "192.168.1.10", "port": 1883, "topic": "factory/line3/#", "qos": 0 }
 ```
+
+**视频（E7a：RTP/UDP）**
+
+```json
+{
+  "bind_ip": "0.0.0.0",
+  "bind_port": 5004,
+  "peer_ip": "",
+  "peer_port": 0,
+  "media": "rtp_udp",
+  "rtsp_url": ""
+}
+```
+
+`media`：E7a 为 `"rtp_udp"`（按 UDP 数据报录放，不解 RTP/H.264）。`rtsp_url` 可选，仅备注；E7c 前不参与 IO。
 
 > ponytail: 配置用 JSON 避免 v1 堆一堆 TLV；上限是解析略重、非零拷贝。若热路径证明不够，再升 typed TLV，版本号升 v2。
 

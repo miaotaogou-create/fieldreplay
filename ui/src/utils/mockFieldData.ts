@@ -108,13 +108,16 @@ export const defaultChannels: ChannelConfig[] = [
   },
   {
     id: 'ch_video_1',
-    name: 'RTSP 相机流 (H.264 Keyframe)',
+    name: '相机 RTP (UDP :5004)',
     type: 'video_stream',
     enabled: false,
     color: '#7c3aed', // Violet-600
     params: {
+      ip: '0.0.0.0',
+      port: 5004,
+      // 备注：E7a 不连 RTSP；完整拉流见 E7c
       streamUrl: 'rtsp://192.168.1.200:554/live/ch0',
-      resolution: '1920x1080@30fps',
+      resolution: 'RTP/UDP',
     },
     connected: false,
     rxBytes: 0,

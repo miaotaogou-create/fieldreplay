@@ -234,6 +234,12 @@ export default function App() {
       throw new Error('会话无帧，请先载入 .fcap');
     }
     const mapped = replayConfigToEngine(tab, cfg);
+    // E7a：视频会话走 UDP 目标区，但 type 须为 video_stream（匹配 .fcap video 通道）
+    const sessionIsVideo =
+      recordedPackets.some((p) => p.channelType === 'video_stream')
+      || sessionMetadata.channels.some((c) => c.type === 'video_stream');
+    const replayType =
+      tab === 'udp' && sessionIsVideo ? 'video_stream' : mapped.type;
     setEngineReplayTick(null);
     const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
     const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
@@ -248,7 +254,7 @@ export default function App() {
         : undefined;
     const loop = !!cfg.loop;
     await engine.startReplay({
-      type: mapped.type,
+      type: replayType,
       config: mapped.config,
       topicPrefix: mapped.topicPrefix,
       speed,
@@ -265,8 +271,8 @@ export default function App() {
     const loopHint = loop ? ' · 循环' : '';
     showToast(
       speed === 1
-        ? `已开始引擎重放：${mapped.type}${faultHint}${loopHint}`
-        : `已开始引擎重放：${mapped.type}（${speed}x）${faultHint}${loopHint}`
+        ? `已开始引擎重放：${replayType}${faultHint}${loopHint}`
+        : `已开始引擎重放：${replayType}（${speed}x）${faultHint}${loopHint}`
     );
   };
 

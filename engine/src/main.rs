@@ -13,11 +13,11 @@ use fieldreplay_engine::fcap::{
 };
 use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
-    replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file,
-    run_io_acceptance, serve_control, MiniBroker, MqttClient, MqttConfig, MqttRecordOptions,
-    MqttReplayOptions, Parity, FaultInjection, RecordOptions, ReplayOptions, SerialConfig,
-    SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions,
-    TcpReplayOptions, TcpRole, DEFAULT_BIND,
+    record_video_to_file, replay_mqtt_from_file, replay_serial_with_port, replay_tcp_from_file,
+    replay_udp_from_file, replay_video_from_file, run_io_acceptance, serve_control, MiniBroker,
+    MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
+    RecordOptions, ReplayOptions, SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions,
+    TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
 };
 
 fn main() {
@@ -585,6 +585,11 @@ fn cmd_self_check() -> io::Result<()> {
     udp_loopback_check()?;
     println!("ok");
 
+    print!("self-check: 视频(RTP/UDP) 录放环回… ");
+    let _ = io::stdout().flush();
+    video_loopback_check()?;
+    println!("ok");
+
     print!("self-check: 串口内存环回录放… ");
     let _ = io::stdout().flush();
     serial_loopback_check()?;
@@ -706,6 +711,116 @@ fn udp_loopback_check() -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("载荷不一致: {got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+fn video_loopback_check() -> io::Result<()> {
+    use std::net::UdpSocket;
+    use std::thread;
+
+    let rec_addr = {
+        let s = UdpSocket::bind("127.0.0.1:0")?;
+        s.local_addr()?
+    };
+
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_video_loop_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+
+    let recorder = thread::spawn(move || {
+        let opts = RecordOptions {
+            bind: rec_addr,
+            out_path: fcap2,
+            channel_name: "video-loop".into(),
+            session_title: Some("video-loop".into()),
+            max_duration: Some(Duration::from_secs(2)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        record_video_to_file(&opts, &stop_rec)
+    });
+
+    thread::sleep(Duration::from_millis(150));
+    let sender = UdpSocket::bind("127.0.0.1:0")?;
+    sender.send_to(b"rtp-fake-1", rec_addr)?;
+    thread::sleep(Duration::from_millis(50));
+    sender.send_to(b"rtp-fake-2", rec_addr)?;
+    thread::sleep(Duration::from_millis(200));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder.join().map_err(|_| err_arg("视频录制线程 panic"))??;
+    if n < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("视频录制帧数不足: {n}"),
+        ));
+    }
+
+    {
+        let r = SessionReader::open(&fcap)?;
+        if r.channels().len() != 1 || r.channels()[0].channel_type != ChannelType::Video {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "视频会话通道类型应为 video",
+            ));
+        }
+        if !r.channels()[0].config_json.contains("rtp_udp") {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "视频 config 应含 media=rtp_udp",
+            ));
+        }
+    }
+
+    let recv_sock = UdpSocket::bind("127.0.0.1:0")?;
+    let recv_addr = recv_sock.local_addr()?;
+    recv_sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+
+    let listener = thread::spawn(move || -> io::Result<Vec<Vec<u8>>> {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 2048];
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while out.len() < 2 && Instant::now() < deadline {
+            match recv_sock.recv_from(&mut buf) {
+                Ok((n, _)) => out.push(buf[..n].to_vec()),
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    });
+
+    let sent = replay_video_from_file(&ReplayOptions {
+        in_path: fcap.clone(),
+        target: recv_addr,
+        local_bind: "127.0.0.1:0".parse().unwrap(),
+        speed: 1.0,
+        fault: FaultInjection::OFF,
+        looping: false,
+    })?;
+    let got = listener.join().map_err(|_| err_arg("视频接收线程 panic"))??;
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 2 || got.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("视频重放不足: sent={sent} got={}", got.len()),
+        ));
+    }
+    if got[0] != b"rtp-fake-1" || got[1] != b"rtp-fake-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("视频载荷不一致: {got:?}"),
         ));
     }
     Ok(())

@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::mqtt::MqttConfig;
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
-    replay_udp_from_file_with, FaultInjection, MqttReplayOptions, OnReplayProgress, ReplayOptions,
-    SerialReplayOptions, TcpReplayOptions,
+    replay_udp_from_file_with, replay_video_from_file_with, FaultInjection, MqttReplayOptions,
+    OnReplayProgress, ReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
 use crate::serial::{Parity, SerialConfig, SerialPort};
 
@@ -301,6 +301,18 @@ fn run_replay(
                 looping,
             };
             replay_udp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
+        }
+        "video" | "video_stream" => {
+            let target = parse_udp_target(config)?;
+            let opts = ReplayOptions {
+                in_path: in_path.to_path_buf(),
+                target,
+                local_bind: "0.0.0.0:0".parse().unwrap(),
+                speed,
+                fault,
+                looping,
+            };
+            replay_video_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
         "serial" => {
             let cfg = parse_serial(config)?;

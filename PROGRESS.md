@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E7 视频后置**；或增强项（pcap / MQTT TLS / 实口 COM 手测） |
+| **下一步** | **E7b** UI/文案抛光；或 **E7c** RTSP 拉流；或增强项（pcap / MQTT TLS / 实口 COM） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -126,7 +126,11 @@ fieldreplay/
 | E6b | 薄壳 WebView2 窗口加载本机 UI；启动时拉起/内嵌引擎 serve | [x] | 2026-10-29：`shell/` + wry/tao；拉起 `serve --ui-dir`；Job 连带回收；`cargo run -- --smoke` 通过 |
 | E6c | 绿色目录打包脚本（主 EXE + ui/dist + 引擎） | [x] | 2026-10-29：`tools/pack_green.ps1`（bat 入口）；产物 `pack/FieldReplay/`；脚本内 `--smoke` 通过 |
 | E6d | 双击手测验收 + README/进度本收口 E6 | [x] | 2026-10-29：**通过**（见下方 E6d 清单）；README/需求/架构已收口 |
-| E7 | （后置）视频通道 | [ ] | |
+| E7 | 视频通道（拆 E7a–E7d） | [~] | 见分项；需求 `docs/requirements/20261030-video.md` |
+| E7a | RTP/UDP 视频通道：录放 + `.fcap` video + 控制面/UI + self-check | [x] | 2026-10-30：复用 UDP 热路径；`media=rtp_udp`；不解编码；UI 可加视频通道；重演 UDP 目标区自动 `video_stream` |
+| E7b | 视频 UI 抛光（重演页目标提示、筛选文案、手测清单） | [ ] | |
+| E7c | 最小 RTSP 客户端拉流（按块落盘，仍不解 NAL） | [ ] | |
+| E7d | 最小 RTSP 服务侧重放 | [ ] | |
 | E8 | 引擎重放倍速（`replay.start.speed`） | [x] | 2026-10-30：时钟按倍速缩墙钟；四通道重放 + 控制面 + UI 倍速按钮接通；循环/暂停仍后置 |
 | E9 | 引擎重放真实暂停（`replay.pause` / `resume`） | [x] | 2026-10-30：时钟冻结时间轴；四通道 + 控制面 + UI 暂停/继续；复位仍走 stop；循环/seek 仍后置 |
 | E10 | 引擎重放 seek（`replay.seek` / `fromUs`） | [x] | 2026-10-30：回卷读头 + 校准时钟；播放/暂停中可拖进度条；启动可从当前头起播；循环仍后置 |
@@ -152,9 +156,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7** 视频后置；或增强项）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7b**；或 E7c / 增强项）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / **E8–E13** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / **打包 E6** / **E8–E13** / **E7a** 已收口；视频分阶段见 `20261030-video.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -198,3 +202,5 @@ fieldreplay/
 | 2026-10-30 | E11：`replay.start.fault`（丢包率 + 篡改载荷）；UI 启用后随引擎重放生效 | 热路径扰动原始字节；不解析业务 CRC；循环仍后置 |
 | 2026-10-30 | E12：`replay.start.loop`；EOF 回卷；UI 循环开关接通引擎 | 空遍不空转；`loop:true` 仅 stop 才 `replay.done` |
 | 2026-10-30 | E13：`io_accept` 挂入 `self-check`；需求 MVP 前 4 条勾选；UDP 录制 SO_RCVBUF | 高速率写盘/间隔重放可自动验；串口仍内存环回；实口/COM 不阻塞勾选 |
+| 2026-10-30 | E7 拆 E7a–E7d；E7a=RTP/UDP 原始块（不解编码、不做 RTSP） | 保真原则优先；完整 RTSP 工作量大且易破 std；先交付可验收的视频通道类型 |
+| 2026-10-30 | E7a 收口：`record`/`replay` video + 控制面 `video`\|`video_stream` + UI | self-check 环回；重演页沿用 UDP 目标映射 |

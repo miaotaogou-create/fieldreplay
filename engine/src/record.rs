@@ -1,4 +1,4 @@
-//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 串口 / TCP / MQTT）。
+//! 录制会话：收包 → 打戳 → 追加 `.fcap`（UDP / 视频·RTP·UDP / 串口 / TCP / MQTT）。
 
 use std::io;
 use std::net::SocketAddr;
@@ -56,15 +56,48 @@ pub fn record_udp_to_file_with(
     stop: &AtomicBool,
     on_packet: &mut OnPacket<'_>,
 ) -> io::Result<u64> {
+    record_datagram_to_file_with(opts, ChannelType::Udp, None, stop, on_packet)
+}
+
+/// 视频通道（E7a）：UDP 数据报热路径，通道类型写 `video`；`rtsp_url` 仅进 config 备注。
+pub fn record_video_to_file(opts: &RecordOptions, stop: &AtomicBool) -> io::Result<u64> {
+    let mut none: OnPacket<'_> = None;
+    record_video_to_file_with(opts, None, stop, &mut none)
+}
+
+pub fn record_video_to_file_with(
+    opts: &RecordOptions,
+    rtsp_url: Option<&str>,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
+    record_datagram_to_file_with(opts, ChannelType::Video, rtsp_url, stop, on_packet)
+}
+
+fn record_datagram_to_file_with(
+    opts: &RecordOptions,
+    channel_type: ChannelType,
+    rtsp_url: Option<&str>,
+    stop: &AtomicBool,
+    on_packet: &mut OnPacket<'_>,
+) -> io::Result<u64> {
     let clock = SessionClock::start();
-    let config_json = format!(
-        r#"{{"bind_ip":"{}","bind_port":{},"peer_ip":"","peer_port":0}}"#,
-        opts.bind.ip(),
-        opts.bind.port()
-    );
+    let config_json = match channel_type {
+        ChannelType::Video => format!(
+            r#"{{"bind_ip":"{}","bind_port":{},"peer_ip":"","peer_port":0,"media":"rtp_udp","rtsp_url":{}}}"#,
+            opts.bind.ip(),
+            opts.bind.port(),
+            json_string(rtsp_url.unwrap_or(""))
+        ),
+        _ => format!(
+            r#"{{"bind_ip":"{}","bind_port":{},"peer_ip":"","peer_port":0}}"#,
+            opts.bind.ip(),
+            opts.bind.port()
+        ),
+    };
     let channels = [ChannelEntry {
         channel_index: 0,
-        channel_type: ChannelType::Udp,
+        channel_type,
         name: opts.channel_name.clone(),
         config_json,
     }];
@@ -81,9 +114,13 @@ pub fn record_udp_to_file_with(
 
     let sock = bind_receiver(opts.bind, Some(opts.poll_timeout))?;
     let mut buf = vec![0u8; 65535];
+    let label = match channel_type {
+        ChannelType::Video => "视频(RTP/UDP)",
+        _ => "UDP",
+    };
 
     eprintln!(
-        "录制中：bind {} → {}",
+        "录制中（{label}）：bind {} → {}",
         opts.bind,
         opts.out_path.display()
     );

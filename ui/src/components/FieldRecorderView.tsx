@@ -75,7 +75,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
 
   // New channel state
   const [newChanName, setNewChanName] = useState('COM4 (力矩传感器)');
-  const [newChanType, setNewChanType] = useState<'serial' | 'udp' | 'tcp' | 'mqtt'>('serial');
+  const [newChanType, setNewChanType] = useState<
+    'serial' | 'udp' | 'tcp' | 'mqtt' | 'video_stream'
+  >('serial');
   const [newChanParam, setNewChanParam] = useState('COM4, 921600, 8-N-1');
 
   // Auto-scroll log
@@ -230,17 +232,23 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     e.preventDefault();
     const isMqtt = newChanType === 'mqtt';
     const isSerial = newChanType === 'serial';
+    const isVideo = newChanType === 'video_stream';
+    const hostPort = newChanParam.includes(':')
+      ? newChanParam.split(':')
+      : [isVideo ? '0.0.0.0' : '127.0.0.1', newChanParam];
+    const listenIp = hostPort[0]?.trim() || (isVideo ? '0.0.0.0' : '127.0.0.1');
+    const listenPort = Number(hostPort[1]?.trim()) || (isVideo ? 5004 : 8888);
     const newChan: ChannelConfig = {
       id: `ch_custom_${Date.now()}`,
       name: newChanName,
       type: newChanType,
       enabled: true,
-      color: isMqtt ? '#0d9488' : '#0891b2',
+      color: isVideo ? '#7c3aed' : isMqtt ? '#0d9488' : '#0891b2',
       params: {
         portName: isSerial ? newChanParam.split(',')[0]?.trim() || 'COM4' : undefined,
         baudRate: isSerial ? 921600 : undefined,
-        ip: !isSerial && !isMqtt ? '127.0.0.1' : undefined,
-        port: !isSerial && !isMqtt ? 8888 : undefined,
+        ip: !isSerial && !isMqtt ? listenIp : undefined,
+        port: !isSerial && !isMqtt ? listenPort : undefined,
         mqttBroker: isMqtt ? (newChanParam.split(',')[0]?.trim() || '127.0.0.1:1883') : undefined,
         mqttTopic: isMqtt ? (newChanParam.split(',')[1]?.trim() || 'factory/+/telemetry') : undefined,
         mqttQoS: isMqtt ? 1 : undefined,
@@ -389,7 +397,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   {chan.type === 'udp' && `UDP :${chan.params.port ?? 8080}`}
                   {chan.type === 'tcp' && `TCP :${chan.params.port ?? 9000} (${chan.params.role ?? 'svr'})`}
                   {chan.type === 'mqtt' && `MQTT ${chan.params.mqttTopic ?? '#'}`}
-                  {chan.type === 'video_stream' && `RTSP 1080P`}
+                  {chan.type === 'video_stream'
+                    && `RTP :${chan.params.port ?? 5004}`}
                 </div>
               </div>
             ))}
@@ -820,12 +829,13 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
             </div>
             <div>
               <label className="block font-medium text-slate-700 mb-1">接口类型</label>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-1.5">
                 {([
-                  { id: 'serial' as const, label: '串口 / RS485' },
-                  { id: 'udp' as const, label: 'UDP 网络' },
-                  { id: 'tcp' as const, label: 'TCP 套接字' },
-                  { id: 'mqtt' as const, label: 'MQTT 订阅' },
+                  { id: 'serial' as const, label: '串口' },
+                  { id: 'udp' as const, label: 'UDP' },
+                  { id: 'tcp' as const, label: 'TCP' },
+                  { id: 'mqtt' as const, label: 'MQTT' },
+                  { id: 'video_stream' as const, label: '视频 RTP' },
                 ]).map((t) => (
                   <button
                     key={t.id}
@@ -834,9 +844,10 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                       setNewChanType(t.id);
                       if (t.id === 'serial') setNewChanParam('COM4, 921600, 8-N-1');
                       else if (t.id === 'mqtt') setNewChanParam('127.0.0.1:1883, factory/+/telemetry');
+                      else if (t.id === 'video_stream') setNewChanParam('0.0.0.0:5004');
                       else setNewChanParam('0.0.0.0:8888');
                     }}
-                    className={`py-2 px-1.5 rounded-lg font-medium border text-center leading-tight ${
+                    className={`py-2 px-1 rounded-lg font-medium border text-center leading-tight ${
                       newChanType === t.id
                         ? 'bg-sky-50 text-sky-700 border-sky-300'
                         : 'bg-white text-slate-600 border-slate-200'
@@ -853,6 +864,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   ? '串口参数'
                   : newChanType === 'mqtt'
                   ? 'Broker 与 Topic'
+                  : newChanType === 'video_stream'
+                  ? 'RTP 监听地址（E7a 不解编码）'
                   : '监听地址'}
               </label>
               <input
@@ -864,6 +877,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                     ? 'COM4, 921600, 8-N-1'
                     : newChanType === 'mqtt'
                     ? '127.0.0.1:1883, factory/+/telemetry'
+                    : newChanType === 'video_stream'
+                    ? '0.0.0.0:5004'
                     : '0.0.0.0:8888'
                 }
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 focus:bg-white"

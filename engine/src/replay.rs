@@ -1,4 +1,4 @@
-//! 按 `relative_us` 将数据帧发往目标（UDP / 串口 / TCP / MQTT）。
+//! 按 `relative_us` 将数据帧发往目标（UDP / 视频·RTP·UDP / 串口 / TCP / MQTT）。
 
 use std::borrow::Cow;
 use std::io;
@@ -172,20 +172,71 @@ pub fn replay_udp_from_file_with(
     from_us: u64,
     on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
+    replay_datagram_from_file_with(
+        opts,
+        ChannelType::Udp,
+        "UDP",
+        stop,
+        paused,
+        seek_us,
+        from_us,
+        on_progress,
+    )
+}
+
+pub fn replay_video_from_file(opts: &ReplayOptions) -> io::Result<u64> {
+    let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
+    let seek = AtomicU64::new(SessionClock::NO_SEEK);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_video_from_file_with(opts, &stop, &paused, &seek, 0, &mut on)
+}
+
+pub fn replay_video_from_file_with(
+    opts: &ReplayOptions,
+    stop: &AtomicBool,
+    paused: &AtomicBool,
+    seek_us: &AtomicU64,
+    from_us: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
+    replay_datagram_from_file_with(
+        opts,
+        ChannelType::Video,
+        "视频(RTP/UDP)",
+        stop,
+        paused,
+        seek_us,
+        from_us,
+        on_progress,
+    )
+}
+
+fn replay_datagram_from_file_with(
+    opts: &ReplayOptions,
+    expect: ChannelType,
+    label: &str,
+    stop: &AtomicBool,
+    paused: &AtomicBool,
+    seek_us: &AtomicU64,
+    from_us: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
     if !reader.header().is_finalized() {
         eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
     }
 
-    let has_udp = reader
+    let has_ch = reader
         .channels()
         .iter()
-        .any(|c| c.channel_type == ChannelType::Udp);
-    if !has_udp {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "会话中无 UDP 通道",
-        ));
+        .any(|c| c.channel_type == expect);
+    if !has_ch {
+        let tip = match expect {
+            ChannelType::Video => "会话中无视频通道",
+            _ => "会话中无 UDP 通道",
+        };
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, tip));
     }
 
     let sock = bind_sender(opts.local_bind)?;
@@ -201,7 +252,7 @@ pub fn replay_udp_from_file_with(
     let mut pass_matched = 0u64;
 
     eprintln!(
-        "重放中：{} → {}（按 relative_us，{}x，fromUs={from_us}{}{}）",
+        "重放中（{label}）：{} → {}（按 relative_us，{}x，fromUs={from_us}{}{}）",
         opts.in_path.display(),
         opts.target,
         speed,
@@ -245,7 +296,7 @@ pub fn replay_udp_from_file_with(
             .channels()
             .iter()
             .find(|c| c.channel_index == pkt.channel_index);
-        if ch.map(|c| c.channel_type) != Some(ChannelType::Udp) {
+        if ch.map(|c| c.channel_type) != Some(expect) {
             continue;
         }
         pass_matched += 1;
