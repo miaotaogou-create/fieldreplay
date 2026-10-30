@@ -11,8 +11,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::mqtt::MqttConfig;
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
-    replay_udp_from_file_with, replay_video_from_file_with, FaultInjection, MqttReplayOptions,
-    OnReplayProgress, ReplayOptions, SerialReplayOptions, TcpReplayOptions,
+    replay_udp_from_file_with, replay_video_from_file_with, replay_video_rtsp_from_file_with,
+    FaultInjection, MqttReplayOptions, OnReplayProgress, ReplayOptions, RtspReplayOptions,
+    SerialReplayOptions, TcpReplayOptions,
 };
 use crate::serial::{Parity, SerialConfig, SerialPort};
 
@@ -303,16 +304,28 @@ fn run_replay(
             replay_udp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
         "video" | "video_stream" => {
-            let target = parse_udp_target(config)?;
-            let opts = ReplayOptions {
-                in_path: in_path.to_path_buf(),
-                target,
-                local_bind: "0.0.0.0:0".parse().unwrap(),
-                speed,
-                fault,
-                looping,
-            };
-            replay_video_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
+            // E7d：mode=rtsp_listen 或 listen_port → RTSP 服务端；否则 UDP 推送
+            if let Some(listen) = parse_rtsp_listen(config)? {
+                let opts = RtspReplayOptions {
+                    in_path: in_path.to_path_buf(),
+                    listen,
+                    speed,
+                    fault,
+                    looping,
+                };
+                replay_video_rtsp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
+            } else {
+                let target = parse_udp_target(config)?;
+                let opts = ReplayOptions {
+                    in_path: in_path.to_path_buf(),
+                    target,
+                    local_bind: "0.0.0.0:0".parse().unwrap(),
+                    speed,
+                    fault,
+                    looping,
+                };
+                replay_video_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
+            }
         }
         "serial" => {
             let cfg = parse_serial(config)?;
@@ -417,6 +430,30 @@ fn parse_udp_target(config: &str) -> io::Result<SocketAddr> {
     format!("{ip}:{port}")
         .parse()
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("UDP target 无效: {e}")))
+}
+
+/// `mode=rtsp_listen` 或存在 `listen_port` → RTSP 服务端；否则走 UDP 推送。
+fn parse_rtsp_listen(config: &str) -> io::Result<Option<SocketAddr>> {
+    let mode = extract_str(config, "mode").unwrap_or_default();
+    let listen_port =
+        extract_u64(config, "listen_port").or_else(|| extract_u64(config, "rtsp_port"));
+    if !mode.eq_ignore_ascii_case("rtsp_listen") && listen_port.is_none() {
+        return Ok(None);
+    }
+    let port = listen_port.unwrap_or(8554);
+    if port > u16::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "listen_port 超出范围",
+        ));
+    }
+    let ip = extract_str(config, "listen_ip")
+        .or_else(|| extract_str(config, "bind_ip"))
+        .unwrap_or_else(|| "0.0.0.0".into());
+    format!("{ip}:{port}")
+        .parse()
+        .map(Some)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("RTSP listen 无效: {e}")))
 }
 
 fn parse_serial(config: &str) -> io::Result<SerialConfig> {

@@ -78,6 +78,10 @@ export interface ReplayConfig {
   loop: boolean;
   targetIp: string;
   targetUdpPort: number;
+  /** 视频会话：UDP 推送已录 RTP，或本机 RTSP 服务端（E7d） */
+  videoOutput?: 'udp' | 'rtsp_listen';
+  /** RTSP 服务端监听口，默认 8554 */
+  rtspListenPort?: number;
   virtualComPort: string;
   // Serial specific configuration
   serial: {

@@ -234,12 +234,21 @@ export default function App() {
       throw new Error('会话无帧，请先载入 .fcap');
     }
     const mapped = replayConfigToEngine(tab, cfg);
-    // E7a：视频会话走 UDP 目标区，但 type 须为 video_stream（匹配 .fcap video 通道）
+    // 视频会话：type=video_stream；E7d 可选 RTSP 服务端，否则 UDP 推送
     const sessionIsVideo =
       recordedPackets.some((p) => p.channelType === 'video_stream')
       || sessionMetadata.channels.some((c) => c.type === 'video_stream');
     const replayType =
       tab === 'udp' && sessionIsVideo ? 'video_stream' : mapped.type;
+    const config =
+      tab === 'udp' && sessionIsVideo && cfg.videoOutput === 'rtsp_listen'
+        ? {
+            mode: 'rtsp_listen',
+            listen_ip: '0.0.0.0',
+            listen_port: cfg.rtspListenPort || 8554,
+            media: 'rtsp_tcp',
+          }
+        : mapped.config;
     setEngineReplayTick(null);
     const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
     const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
@@ -255,7 +264,7 @@ export default function App() {
     const loop = !!cfg.loop;
     await engine.startReplay({
       type: replayType,
-      config: mapped.config,
+      config,
       topicPrefix: mapped.topicPrefix,
       speed,
       fromUs: startUs,

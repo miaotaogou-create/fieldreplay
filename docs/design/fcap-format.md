@@ -147,7 +147,7 @@
 
 `media`：
 - `"rtp_udp"`（E7a）：按 UDP 数据报录放，不解 RTP/H.264。
-- `"rtsp_tcp"`（E7c）：录制时对 `rtsp_url` 做最小 RTSP 客户端（交织 TCP），每块原始字节落盘；重放暂仍按 UDP 发往目标（E7d 再做 RTSP 服务端）。
+- `"rtsp_tcp"`（E7c/E7d）：录制时对 `rtsp_url` 做最小 RTSP 客户端（交织 TCP），每块原始字节落盘；重放可选 UDP 推送，或 `mode=rtsp_listen` + `listen_port` 作本机 RTSP 服务端按时间轴吐块。
 
 `rtsp_url`：非空则走 E7c 拉流；空则走 E7a bind 收包。
 

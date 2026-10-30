@@ -78,6 +78,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     loop: true,
     targetIp: '127.0.0.1',
     targetUdpPort: 8080,
+    videoOutput: 'udp',
+    rtspListenPort: 8554,
     virtualComPort: 'COM2',
     serial: {
       selectedPort: 'COM2',
@@ -970,33 +972,84 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                 )}
               </div>
               {sessionIsVideo && (
-                <p className="text-[11px] text-violet-900/80 leading-snug">
-                  按时间轴向目标口发送已录 RTP/UDP 数据报；不解 H.264。完整 RTSP 服务侧重放后置。
-                </p>
+                <>
+                  <p className="text-[11px] text-violet-900/80 leading-snug">
+                    不解 H.264。可选 UDP 推送已录数据报，或本机 RTSP 服务端（交织 TCP）供上位机拉流。
+                  </p>
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="videoOutput"
+                        checked={(replayConfig.videoOutput || 'udp') === 'udp'}
+                        onChange={() =>
+                          setReplayConfig({ ...replayConfig, videoOutput: 'udp' })
+                        }
+                      />
+                      UDP 推送
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="videoOutput"
+                        checked={replayConfig.videoOutput === 'rtsp_listen'}
+                        onChange={() =>
+                          setReplayConfig({
+                            ...replayConfig,
+                            videoOutput: 'rtsp_listen',
+                          })
+                        }
+                      />
+                      RTSP 服务端
+                    </label>
+                  </div>
+                </>
               )}
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500">推送到:</span>
-                <input
-                  type="text"
-                  value={replayConfig.targetIp}
-                  onChange={(e) =>
-                    setReplayConfig({ ...replayConfig, targetIp: e.target.value })
-                  }
-                  className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-28 font-mono text-xs"
-                />
-                <span className="text-slate-400">:</span>
-                <input
-                  type="number"
-                  value={replayConfig.targetUdpPort}
-                  onChange={(e) =>
-                    setReplayConfig({
-                      ...replayConfig,
-                      targetUdpPort: parseInt(e.target.value) || (sessionIsVideo ? 5004 : 8080),
-                    })
-                  }
-                  className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-20 font-mono text-xs"
-                />
-              </div>
+              {sessionIsVideo && replayConfig.videoOutput === 'rtsp_listen' ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">监听口:</span>
+                  <span className="font-mono text-slate-700">0.0.0.0:</span>
+                  <input
+                    type="number"
+                    value={replayConfig.rtspListenPort ?? 8554}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        rtspListenPort: parseInt(e.target.value) || 8554,
+                      })
+                    }
+                    className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-20 font-mono text-xs"
+                  />
+                  <span className="text-[10px] text-slate-500">
+                    上位机连 rtsp://本机:端口/…
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">推送到:</span>
+                  <input
+                    type="text"
+                    value={replayConfig.targetIp}
+                    onChange={(e) =>
+                      setReplayConfig({ ...replayConfig, targetIp: e.target.value })
+                    }
+                    className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-28 font-mono text-xs"
+                  />
+                  <span className="text-slate-400">:</span>
+                  <input
+                    type="number"
+                    value={replayConfig.targetUdpPort}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        targetUdpPort:
+                          parseInt(e.target.value) || (sessionIsVideo ? 5004 : 8080),
+                      })
+                    }
+                    className="bg-white border border-slate-300 rounded px-2 py-0.5 text-slate-800 w-20 font-mono text-xs"
+                  />
+                </div>
+              )}
             </div>
           )}
 

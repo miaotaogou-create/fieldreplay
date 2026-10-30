@@ -1,8 +1,8 @@
-//! 按 `relative_us` 将数据帧发往目标（UDP / 视频·RTP·UDP / 串口 / TCP / MQTT）。
+//! 按 `relative_us` 将数据帧发往目标（UDP / 视频·RTP·UDP|RTSP / 串口 / TCP / MQTT）。
 
 use std::borrow::Cow;
-use std::io;
-use std::net::SocketAddr;
+use std::io::{self, Write};
+use std::net::{SocketAddr, TcpListener};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -12,6 +12,7 @@ use crate::fcap::{ChannelType, PacketKind, SessionReader};
 use crate::mqtt::{
     apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, MqttClient, MqttConfig,
 };
+use crate::rtsp::{accept_until_play, encode_interleaved, poll_client_signal};
 use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{accept_until, connect, listen, write_all, TcpConfig, TcpRole};
 use crate::udp::{bind_sender, send_to};
@@ -210,6 +211,197 @@ pub fn replay_video_from_file_with(
         from_us,
         on_progress,
     )
+}
+
+/// E7d：本机 RTSP 服务端，PLAY 后按时间轴交织吐块（不解 NAL）。
+pub struct RtspReplayOptions {
+    pub in_path: std::path::PathBuf,
+    pub listen: SocketAddr,
+    pub speed: f64,
+    pub fault: FaultInjection,
+    pub looping: bool,
+}
+
+pub fn replay_video_rtsp_from_file(opts: &RtspReplayOptions) -> io::Result<u64> {
+    let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
+    let seek = AtomicU64::new(SessionClock::NO_SEEK);
+    let mut on: OnReplayProgress<'_> = None;
+    replay_video_rtsp_from_file_with(opts, &stop, &paused, &seek, 0, &mut on)
+}
+
+pub fn replay_video_rtsp_from_file_with(
+    opts: &RtspReplayOptions,
+    stop: &AtomicBool,
+    paused: &AtomicBool,
+    seek_us: &AtomicU64,
+    from_us: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
+    let listener = TcpListener::bind(opts.listen)?;
+    replay_video_rtsp_with_listener(
+        listener,
+        &opts.in_path,
+        opts.speed,
+        opts.fault,
+        opts.looping,
+        stop,
+        paused,
+        seek_us,
+        from_us,
+        on_progress,
+    )
+}
+
+/// 使用已绑定的 listener（自检可先 `local_addr` 再启动客户端）。
+pub fn replay_video_rtsp_with_listener(
+    listener: TcpListener,
+    in_path: &Path,
+    speed: f64,
+    fault: FaultInjection,
+    looping: bool,
+    stop: &AtomicBool,
+    paused: &AtomicBool,
+    seek_us: &AtomicU64,
+    from_us: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
+    let mut reader = SessionReader::open(in_path)?;
+    if !reader.header().is_finalized() {
+        eprintln!("警告：文件未标记 FINALIZED，将扫到 EOF");
+    }
+    if !reader
+        .channels()
+        .iter()
+        .any(|c| c.channel_type == ChannelType::Video)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "会话中无视频通道",
+        ));
+    }
+
+    let bound = listener.local_addr()?;
+    let speed = SessionClock::clamp_speed(speed);
+    eprintln!(
+        "重放中（视频·RTSP 服务端）：{} → listen {}（等待 PLAY，{}x，fromUs={from_us}{}{}）",
+        in_path.display(),
+        bound,
+        speed,
+        if fault.clamped().is_active() {
+            "，故障注入"
+        } else {
+            ""
+        },
+        if looping { "，循环" } else { "" }
+    );
+
+    let mut stream = accept_until_play(&listener, stop)?;
+    eprintln!("RTSP 客户端已 PLAY，开始按时间轴吐块");
+
+    let mut base = Instant::now();
+    let mut skip_before_us = from_us;
+    if from_us > 0 {
+        SessionClock::rebase_timeline(&mut base, from_us, speed);
+    }
+    let mut sent = 0u64;
+    let mut rng = FaultRng::new();
+    let fault = fault.clamped();
+    let mut pass_matched = 0u64;
+    let mut sig_buf = Vec::new();
+
+    reader.rewind_packets()?;
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        match poll_client_signal(&mut stream, &mut sig_buf) {
+            Ok(()) => {}
+            Err(e)
+                if e.kind() == io::ErrorKind::UnexpectedEof
+                    || e.kind() == io::ErrorKind::ConnectionAborted
+                    || e.kind() == io::ErrorKind::ConnectionReset
+                    || e.kind() == io::ErrorKind::BrokenPipe =>
+            {
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+        if let Some(target) = take_pending_seek(seek_us, &mut reader, &mut base, speed)? {
+            skip_before_us = target;
+            if let Some(cb) = on_progress.as_mut() {
+                cb(sent, target);
+            }
+            continue;
+        }
+        let Some(pkt) = reader.next_packet()? else {
+            if try_restart_loop(
+                looping,
+                stop,
+                pass_matched,
+                &mut reader,
+                &mut base,
+                speed,
+                &mut skip_before_us,
+                &mut pass_matched,
+                sent,
+                on_progress,
+            )? {
+                continue;
+            }
+            break;
+        };
+        if pkt.kind != PacketKind::Data {
+            continue;
+        }
+        let ch = reader
+            .channels()
+            .iter()
+            .find(|c| c.channel_index == pkt.channel_index);
+        if ch.map(|c| c.channel_type) != Some(ChannelType::Video) {
+            continue;
+        }
+        pass_matched += 1;
+        if pkt.relative_us < skip_before_us {
+            continue;
+        }
+        match SessionClock::sleep_until_relative_interruptible(
+            &mut base,
+            pkt.relative_us,
+            speed,
+            stop,
+            paused,
+            seek_us,
+        ) {
+            WaitResult::Stopped => break,
+            WaitResult::Seek => continue,
+            WaitResult::Ready => {}
+        }
+        let write_ok = emit_with_fault(
+            &pkt.payload,
+            &fault,
+            &mut rng,
+            pkt.relative_us,
+            &mut sent,
+            on_progress,
+            |bytes| {
+                let frame = encode_interleaved(0, bytes);
+                stream.write_all(&frame)
+            },
+        );
+        if let Err(e) = write_ok {
+            if e.kind() == io::ErrorKind::BrokenPipe
+                || e.kind() == io::ErrorKind::ConnectionReset
+                || e.kind() == io::ErrorKind::UnexpectedEof
+            {
+                break;
+            }
+            return Err(e);
+        }
+    }
+
+    eprintln!("重放结束：发送 {sent} 帧");
+    Ok(sent)
 }
 
 fn replay_datagram_from_file_with(

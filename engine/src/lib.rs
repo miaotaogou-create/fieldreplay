@@ -33,8 +33,9 @@ pub use record::{
 };
 pub use replay::{
     apply_fault, replay_mqtt_from_file, replay_serial_from_file, replay_serial_with_port,
-    replay_tcp_from_file, replay_udp_from_file, replay_video_from_file, FaultInjection, FaultRng,
-    MqttReplayOptions, ReplayOptions, SerialReplayOptions, TcpReplayOptions,
+    replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
+    replay_video_rtsp_from_file, FaultInjection, FaultRng, MqttReplayOptions, ReplayOptions,
+    RtspReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
 pub use serial::{Parity, SerialConfig, SerialPort};
 pub use tcp::{TcpConfig, TcpRole};
