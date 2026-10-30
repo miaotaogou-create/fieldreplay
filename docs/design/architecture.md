@@ -78,7 +78,7 @@
 | `replay.start` | 对已载入会话按时间轴重放：`type` + `config`（UDP `target_ip`/`target_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`，角色由文件取反；MQTT `broker`/`port` + 可选 `topicPrefix`）；可选 `speed`（墙钟倍速，默认 1.0，范围约 0.05–100）。同时刻一路，与录制互斥。推送 `replay.progress`（`sent`/`relativeUs`/`durationUs`）与结束时 `replay.done` |
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位 |
 
-UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接时仍可下载 JSON 离线演示包。**倍速已接通**（`replay.start.speed`）。**真实暂停已接通**（`replay.pause` / `resume`）。seek / 故障注入仍后置。
+UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接时仍可下载 JSON 离线演示包。**倍速 / 暂停 / seek 已接通**（`replay.start.speed`、`pause`/`resume`、`seek`/`fromUs`）。故障注入仍后置。
 
 ## 会话文件
 

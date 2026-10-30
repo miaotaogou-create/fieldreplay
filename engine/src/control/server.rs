@@ -14,10 +14,13 @@ use super::b64;
 use super::dto::{session_to_json, status_json};
 use super::hub::PushHub;
 use super::http_static::{self, get_path, is_head, serve_file, serve_no_ui};
-use super::json_util::{err_result, escape_str, extract_object, extract_str, ok_result};
+use super::json_util::{
+    err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
+};
 use super::live::{handle_record_start, handle_record_stop};
 use super::replay_live::{
-    handle_replay_pause, handle_replay_resume, handle_replay_start, handle_replay_stop,
+    handle_replay_pause, handle_replay_resume, handle_replay_seek, handle_replay_start,
+    handle_replay_stop,
 };
 use super::session_file::export_session_bytes;
 use super::state::{ControlState, LoadedSession};
@@ -220,6 +223,10 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
         },
         "replay.resume" => match state.lock() {
             Ok(mut g) => handle_replay_resume(&id, &mut g),
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "replay.seek" => match state.lock() {
+            Ok(mut g) => handle_replay_seek(&id, msg, &mut g),
             Err(_) => err_result(&id, "状态锁损坏"),
         },
         "replay.stop" => {
@@ -426,6 +433,7 @@ pub fn self_check_control() -> io::Result<()> {
     // E5c：先测重放（会话仍是 sample.fcap），再测录制（会覆盖内存会话）
     self_check_replay_via_ws(&mut client, &path)?;
     self_check_replay_pause_via_ws(&mut client, &path)?;
+    self_check_replay_seek_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
@@ -751,6 +759,97 @@ fn self_check_replay_pause_via_ws(client: &mut TcpStream, session_path: &Path) -
     }
 
     eprintln!("  控制面 replay.pause/resume：通过");
+    Ok(())
+}
+
+/// 验证 `replay.seek`：慢速启动后 seek 到后半段，进度相对时戳应跳到目标附近。
+fn self_check_replay_seek_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let recv = UdpSocket::bind("127.0.0.1:0")?;
+    recv.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let target = recv.local_addr()?;
+
+    let open = format!(
+        r#"{{"id":"s0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "seek 自检未收到 session.open")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("seek 自检 session.open 失败: {opened}"),
+        ));
+    }
+
+    // sample 帧约在 1000us / 50000us；0.05x 拉长墙钟，便于抢在第二帧前 seek
+    let start = format!(
+        r#"{{"id":"s1","cmd":"replay.start","type":"udp","speed":0.05,"config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        target.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "seek 自检未收到 replay.start")
+    })?;
+    if !started.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("seek 自检 replay.start 失败: {started}"),
+        ));
+    }
+
+    write_text_frame_client(
+        client,
+        r#"{"id":"s2","cmd":"replay.seek","relativeUs":50000}"#,
+    )?;
+    let seeked = drain_until_id(client, "s2")?;
+    if !seeked.contains("\"ok\":true") || !seeked.contains("\"seeked\":true") {
+        let _ = write_text_frame_client(client, r#"{"id":"sx","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("replay.seek 失败: {seeked}"),
+        ));
+    }
+
+    // 等 progress 推到 ≥40000（seek 回调或后续发帧）
+    let mut saw_seek_progress = false;
+    client.set_read_timeout(Some(Duration::from_secs(3)))?;
+    for _ in 0..48 {
+        let frame = match read_text_frame(client)? {
+            Some(f) => f,
+            None => break,
+        };
+        if frame.contains("\"event\":\"replay.progress\"") && frame.contains("\"relativeUs\":") {
+            if let Some(us) = extract_u64(&frame, "relativeUs") {
+                if us >= 40_000 {
+                    saw_seek_progress = true;
+                    break;
+                }
+            }
+        }
+        if frame.contains("\"event\":\"replay.done\"") {
+            break;
+        }
+    }
+    if !saw_seek_progress {
+        let _ = write_text_frame_client(client, r#"{"id":"sx","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "seek 后未看到 relativeUs≥40000 的 progress",
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"s3","cmd":"replay.stop"}"#)?;
+    let stopped = drain_until_id(client, "s3")?;
+    if !stopped.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("seek 自检 replay.stop 失败: {stopped}"),
+        ));
+    }
+
+    eprintln!("  控制面 replay.seek：通过");
     Ok(())
 }
 

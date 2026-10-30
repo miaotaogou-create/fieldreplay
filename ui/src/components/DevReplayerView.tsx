@@ -41,11 +41,13 @@ interface DevReplayerViewProps {
   engineReplayDoneSeq?: number;
   onEngineStartReplay?: (
     tab: ReplayTargetType,
-    cfg: ReplayConfig
+    cfg: ReplayConfig,
+    fromUs: number
   ) => Promise<void>;
   onEngineStopReplay?: () => Promise<unknown>;
   onEnginePauseReplay?: () => Promise<unknown>;
   onEngineResumeReplay?: () => Promise<unknown>;
+  onEngineSeekReplay?: (relativeUs: number) => Promise<unknown>;
 }
 
 export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
@@ -61,6 +63,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   onEngineStopReplay,
   onEnginePauseReplay,
   onEngineResumeReplay,
+  onEngineSeekReplay,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   /** 引擎重放已启动且处于暂停（时间轴冻结）；离线 mock 不用此态 */
@@ -123,7 +126,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     && !!onEngineStartReplay
     && !!onEngineStopReplay
     && !!onEnginePauseReplay
-    && !!onEngineResumeReplay;
+    && !!onEngineResumeReplay
+    && !!onEngineSeekReplay;
   const engineBusy = useEngineReplay && (isPlaying || isPaused);
 
   const totalDurationUs = hasPackets ? packets[packets.length - 1].timestampUs : 0;
@@ -270,10 +274,10 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         return;
       }
       engineBusyRef.current = true;
-      setCurrentIndex(0);
+      const fromUs = packets[safeIndex]?.timestampUs ?? 0;
       setDispatchedPackets([]);
       setIsPaused(false);
-      void onEngineStartReplay!(activeTargetTab, replayConfig)
+      void onEngineStartReplay!(activeTargetTab, replayConfig, fromUs)
         .then(() => {
           setIsPlaying(true);
         })
@@ -316,12 +320,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     setCurrentIndex((prev) => Math.max(0, prev - 1));
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!hasPackets || totalDurationUs <= 0) return;
-    if (engineBusy) return;
-    const val = parseFloat(e.target.value);
-    const targetUs = (val / 100) * totalDurationUs;
-    // Find closest packet index
+  const seekToUs = (targetUs: number) => {
+    if (!hasPackets) return;
     let closestIdx = 0;
     let minDiff = Infinity;
     for (let i = 0; i < packets.length; i++) {
@@ -332,6 +332,18 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       }
     }
     setCurrentIndex(closestIdx);
+    if (useEngineReplay && (isPlaying || isPaused)) {
+      void onEngineSeekReplay!(packets[closestIdx].timestampUs).catch((e) => {
+        console.error(e);
+      });
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!hasPackets || totalDurationUs <= 0) return;
+    const val = parseFloat(e.target.value);
+    const targetUs = (val / 100) * totalDurationUs;
+    seekToUs(targetUs);
   };
 
   const handleSpeedChange = (s: number) => {
@@ -493,7 +505,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => setCurrentIndex(idx)}
+                    onClick={() => seekToUs(p.timestampUs)}
                     title={`故障点：${p.errorReason || '异常帧'}（点击跳转）`}
                     aria-label={`故障点：${p.errorReason || '异常帧'}`}
                     className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rotate-45 bg-rose-500 border border-rose-200 shadow-sm cursor-pointer hover:scale-150 transition-transform z-10"

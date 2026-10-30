@@ -223,7 +223,8 @@ export default function App() {
 
   const handleEngineStartReplay = async (
     tab: ReplayTargetType,
-    cfg: ReplayConfig
+    cfg: ReplayConfig,
+    fromUs: number
   ) => {
     const engine = engineRef.current;
     if (!engine?.connected) {
@@ -235,11 +236,13 @@ export default function App() {
     const mapped = replayConfigToEngine(tab, cfg);
     setEngineReplayTick(null);
     const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
+    const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
     await engine.startReplay({
       type: mapped.type,
       config: mapped.config,
       topicPrefix: mapped.topicPrefix,
       speed,
+      fromUs: startUs,
     });
     showToast(
       speed === 1
@@ -276,6 +279,14 @@ export default function App() {
     const result = await engine.resumeReplay();
     showToast(result.already ? '已在播放' : '重放已继续');
     return result;
+  };
+
+  const handleEngineSeekReplay = async (relativeUs: number) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    return engine.seekReplay(Math.max(0, Math.floor(relativeUs)));
   };
 
   const handleClearSession = () => {
@@ -493,6 +504,7 @@ export default function App() {
             onEngineStopReplay={handleEngineStopReplay}
             onEnginePauseReplay={handleEnginePauseReplay}
             onEngineResumeReplay={handleEngineResumeReplay}
+            onEngineSeekReplay={handleEngineSeekReplay}
           />
         )}
 

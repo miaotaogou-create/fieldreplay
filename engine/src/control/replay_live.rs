@@ -1,4 +1,4 @@
-//! 控制面实时重放：`replay.start` / `replay.pause` / `replay.resume` / `replay.stop`，经 PushHub 推送进度。
+//! 控制面实时重放：`replay.start` / `pause` / `resume` / `seek` / `stop`，经 PushHub 推送进度。
 
 use std::io;
 use std::net::SocketAddr;
@@ -54,6 +54,9 @@ pub fn handle_replay_start(
         .or_else(|| extract_str(msg, "topic_prefix"))
         .unwrap_or_default();
     let speed = SessionClock::clamp_speed(extract_f64(msg, "speed").unwrap_or(1.0));
+    let from_us = extract_u64(msg, "fromUs")
+        .or_else(|| extract_u64(msg, "from_us"))
+        .unwrap_or(0);
 
     let (in_path, duration_us) = {
         let session = state.session.as_ref().unwrap();
@@ -73,11 +76,13 @@ pub fn handle_replay_start(
 
     let stop = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
+    let seek_us = Arc::new(AtomicU64::new(SessionClock::NO_SEEK));
     let finished = Arc::new(AtomicBool::new(false));
     let sent_count = Arc::new(AtomicU64::new(0));
     let hub_c = Arc::clone(hub);
     let stop_c = Arc::clone(&stop);
     let paused_c = Arc::clone(&paused);
+    let seek_c = Arc::clone(&seek_us);
     let finished_c = Arc::clone(&finished);
     let sent_c = Arc::clone(&sent_count);
     let ty_c = ty.clone();
@@ -93,8 +98,10 @@ pub fn handle_replay_start(
             &prefix_c,
             duration_us,
             speed,
+            from_us,
             &stop_c,
             &paused_c,
+            &seek_c,
             &sent_c,
             &hub_c,
         );
@@ -112,6 +119,7 @@ pub fn handle_replay_start(
     state.replaying = Some(ActiveReplay {
         stop,
         paused,
+        seek_us,
         finished,
         channel_type: ty.clone(),
         sent_count,
@@ -122,7 +130,7 @@ pub fn handle_replay_start(
     ok_result(
         id,
         &format!(
-            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed}}}",
+            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us}}}",
             escape_str(&ty),
             if config_raw.trim().is_empty() {
                 "{}"
@@ -155,6 +163,36 @@ pub fn handle_replay_resume(id: &str, state: &mut ControlState) -> String {
     }
     active.paused.store(false, Ordering::SeqCst);
     ok_result(id, "{\"paused\":false}")
+}
+
+pub fn handle_replay_seek(id: &str, msg: &str, state: &mut ControlState) -> String {
+    state.reap_finished_replay();
+    let Some(active) = state.replaying.as_ref() else {
+        return err_result(id, "当前未在重放，无法 seek");
+    };
+    let relative_us = match extract_u64(msg, "relativeUs").or_else(|| extract_u64(msg, "relative_us"))
+    {
+        Some(v) => v,
+        None => return err_result(id, "replay.seek 需要 relativeUs"),
+    };
+    if relative_us > active.duration_us && active.duration_us > 0 {
+        // 允许略超尾：夹到 duration
+        active
+            .seek_us
+            .store(active.duration_us, Ordering::SeqCst);
+        return ok_result(
+            id,
+            &format!(
+                "{{\"seeked\":true,\"relativeUs\":{},\"clamped\":true}}",
+                active.duration_us
+            ),
+        );
+    }
+    active.seek_us.store(relative_us, Ordering::SeqCst);
+    ok_result(
+        id,
+        &format!("{{\"seeked\":true,\"relativeUs\":{relative_us},\"clamped\":false}}"),
+    )
 }
 
 pub fn handle_replay_stop(
@@ -217,8 +255,10 @@ fn run_replay(
     topic_prefix: &str,
     duration_us: u64,
     speed: f64,
+    from_us: u64,
     stop: &AtomicBool,
     paused: &AtomicBool,
+    seek_us: &AtomicU64,
     sent_count: &Arc<AtomicU64>,
     hub: &Arc<PushHub>,
 ) -> io::Result<u64> {
@@ -242,7 +282,7 @@ fn run_replay(
                 local_bind: "0.0.0.0:0".parse().unwrap(),
                 speed,
             };
-            replay_udp_from_file_with(&opts, stop, paused, &mut on)
+            replay_udp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
         "serial" => {
             let cfg = parse_serial(config)?;
@@ -252,7 +292,7 @@ fn run_replay(
                 speed,
             };
             let port = SerialPort::open(&opts.config, poll)?;
-            replay_serial_with_port_with(&opts, &port, stop, paused, &mut on)
+            replay_serial_with_port_with(&opts, &port, stop, paused, seek_us, from_us, &mut on)
         }
         "tcp" => {
             let endpoint = parse_tcp_endpoint(config)?;
@@ -262,7 +302,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
             };
-            replay_tcp_from_file_with(&opts, stop, paused, &mut on)
+            replay_tcp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
         "mqtt" => {
             let broker = parse_mqtt_broker(config)?;
@@ -281,7 +321,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
             };
-            replay_mqtt_from_file_with(&opts, stop, paused, &mut on)
+            replay_mqtt_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
         other => Err(io::Error::new(
             io::ErrorKind::InvalidInput,

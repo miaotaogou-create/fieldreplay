@@ -97,6 +97,12 @@ export interface EngineReplayResumeResult {
   already?: boolean;
 }
 
+export interface EngineReplaySeekResult {
+  seeked: boolean;
+  relativeUs: number;
+  clamped?: boolean;
+}
+
 export interface EngineSessionExportResult {
   exported: boolean;
   packetCount: number;

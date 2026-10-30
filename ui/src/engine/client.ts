@@ -12,6 +12,7 @@ import {
   EngineRecordStopResult,
   EngineReplayPauseResult,
   EngineReplayResumeResult,
+  EngineReplaySeekResult,
   EngineReplayStartResult,
   EngineReplayStopResult,
   EngineRpcErr,
@@ -195,6 +196,8 @@ export class EngineClient {
     topicPrefix?: string;
     /** 墙钟倍速；默认 1.0 */
     speed?: number;
+    /** 从该相对微秒起播（跳过更早数据帧） */
+    fromUs?: number;
   }): Promise<EngineReplayStartResult> {
     return this.request<EngineReplayStartResult>('replay.start', args);
   }
@@ -209,6 +212,10 @@ export class EngineClient {
 
   resumeReplay(): Promise<EngineReplayResumeResult> {
     return this.request<EngineReplayResumeResult>('replay.resume', {});
+  }
+
+  seekReplay(relativeUs: number): Promise<EngineReplaySeekResult> {
+    return this.request<EngineReplaySeekResult>('replay.seek', { relativeUs });
   }
 }
 

@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | 可选：seek / 故障注入；或补需求真实 IO 端到端勾选；**E7 视频后置** |
+| **下一步** | 可选：故障注入（引擎侧）；或补需求真实 IO 端到端勾选；**E7 视频后置** |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -129,6 +129,7 @@ fieldreplay/
 | E7 | （后置）视频通道 | [ ] | |
 | E8 | 引擎重放倍速（`replay.start.speed`） | [x] | 2026-10-30：时钟按倍速缩墙钟；四通道重放 + 控制面 + UI 倍速按钮接通；循环/暂停仍后置 |
 | E9 | 引擎重放真实暂停（`replay.pause` / `resume`） | [x] | 2026-10-30：时钟冻结时间轴；四通道 + 控制面 + UI 暂停/继续；复位仍走 stop；循环/seek 仍后置 |
+| E10 | 引擎重放 seek（`replay.seek` / `fromUs`） | [x] | 2026-10-30：回卷读头 + 校准时钟；播放/暂停中可拖进度条；启动可从当前头起播；循环仍后置 |
 
 ### E6d 手测清单（2026-10-29，`pack\FieldReplay\fieldreplay.exe`）
 
@@ -144,11 +145,11 @@ fieldreplay/
 | 空会话：重演播放条禁用 | 通过 | |
 | 「离线演示样本」→ 报文有帧 / 重演可播 | 通过 | 会话标题与故障点可见 |
 | README / 进度本 / 需求勾选收口 | 通过 | 本轮文档已更新 |
-| **残留（不阻塞 E6）** | — | seek / 故障注入后置；真实 IO 端到端勾选见需求前 4 条 |
+| **残留（不阻塞 E6）** | — | 故障注入后置；真实 IO 端到端勾选见需求前 4 条 |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7** 视频后置；或 seek/故障注入/IO 验收）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7** 视频后置；或故障注入/IO 验收）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
 3. 界面 U / 引擎 E5 / **打包 E6** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
@@ -190,3 +191,4 @@ fieldreplay/
 | 2026-10-30 | E8：`replay.start` 支持 `speed`；UI 倍速按钮对引擎生效 | 需求写了倍速增强；原先引擎固定 1x |
 | 2026-10-30 | 收口 G1/G3（去 Qt 口吻；清空/新录复位会话标题） | U8 残留抛光 |
 | 2026-10-30 | E9：`replay.pause`/`resume`；暂停期间墙钟不计入时间轴；UI 接通 | 进度本「真实暂停」；复位仍 `replay.stop` |
+| 2026-10-30 | E10：`replay.seek` + `replay.start.fromUs`；进度条/故障点跳转接通引擎 | 播放中可 scrub；TCP seek 会重跑连接事件 |
