@@ -91,4 +91,4 @@ cargo run -- self-check
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
 MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。  
 pcap 导出：`export-pcap` 或控制面/UI「同时导出 .pcap」；见 `docs/requirements/20261030-pcap-export.md`。  
-pcap 导入：`import-pcap` / 控制面 `session.importPcap`（E14c）；UI 入口见 E14d、`docs/requirements/20261030-pcap-import.md`。
+pcap 导入：`import-pcap` / 控制面 `session.importPcap`；UI 重演页「导入 .pcap」（E14 已收口）；见 `docs/requirements/20261030-pcap-import.md`。

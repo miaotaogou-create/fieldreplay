@@ -238,7 +238,7 @@ export const PacketsView: React.FC<PacketsViewProps> = ({ packets, onSelectPacke
               <div className="flex flex-col items-center justify-center py-10 text-slate-400 space-y-2 font-sans h-full min-h-[8rem]">
                 <Inbox className="w-7 h-7 text-slate-300 stroke-[1.5]" />
                 {packets.length === 0 ? (
-                  <p className="text-xs">暂无报文，请先在录制页采集或从重演页载入 `.fcap`</p>
+                  <p className="text-xs">暂无报文，请先在录制页采集或从重演页载入 `.fcap` / 导入 `.pcap`</p>
                 ) : (
                   <>
                     <p className="text-xs">当前筛选条件下无匹配报文</p>

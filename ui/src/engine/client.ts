@@ -22,6 +22,7 @@ import {
   EngineSessionExportPcapResult,
   EngineAddMarkerResult,
   EngineTrimResult,
+  EngineImportPcapResult,
   EngineSerialListResult,
 } from './types';
 
@@ -305,6 +306,18 @@ export class EngineClient {
       packetCount: result.packetCount,
       replaced: result.replaced,
     };
+  }
+
+  /** E14d：经典以太网 pcap → 内存会话（默认替换） */
+  importSessionPcap(
+    bytes: Uint8Array,
+    sourceHint?: string
+  ): Promise<EngineImportPcapResult> {
+    const fields: Record<string, unknown> = {
+      b64: bytesToBase64(bytes),
+    };
+    if (sourceHint) fields.sourceHint = sourceHint;
+    return this.request<EngineImportPcapResult>('session.importPcap', fields);
   }
 }
 

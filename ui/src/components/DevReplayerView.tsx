@@ -55,8 +55,10 @@ interface DevReplayerViewProps {
   sessionMetadata: CaptureSessionMetadata;
   packets: CapturedPacket[];
   onUploadSession: (metadata: CaptureSessionMetadata, packets: CapturedPacket[]) => void;
-  /** 优先走引擎解析真实二进制 .fcap；未连引擎时可回落 JSON 演示包 */
+  /** 优先走引擎解析真实二进制 .fcap / 经典 .pcap；未连引擎时可回落 JSON 演示包 */
   onLoadCaptureFile?: (file: File) => void | Promise<void>;
+  /** 未连引擎时点「导入 .pcap」的提示（由 App toast） */
+  onPcapImportNeedEngine?: () => void;
   onSelectPacketForInspection: (packet: CapturedPacket) => void;
   engineConnected?: boolean;
   engineReplayTick?: {
@@ -94,6 +96,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   packets,
   onUploadSession,
   onLoadCaptureFile,
+  onPcapImportNeedEngine,
   onSelectPacketForInspection,
   engineConnected = false,
   engineReplayTick = null,
@@ -180,6 +183,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   >([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pcapInputRef = useRef<HTMLInputElement>(null);
 
   const sessionChannelKey = sessionMetadata.channels
     .map((c) => `${c.id}:${c.type}:${c.packetCount}`)
@@ -512,17 +516,19 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     setReplayConfig((cfg) => ({ ...cfg, speed: s }));
   };
 
+  const applyLoadedCapture = () => {
+    setCurrentIndex(0);
+    setIsPlaying(false);
+    setIsPaused(false);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = '';
 
     if (onLoadCaptureFile) {
-      void Promise.resolve(onLoadCaptureFile(file)).then(() => {
-        setCurrentIndex(0);
-        setIsPlaying(false);
-        setIsPaused(false);
-      });
+      void Promise.resolve(onLoadCaptureFile(file)).then(applyLoadedCapture);
       return;
     }
 
@@ -537,14 +543,34 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             data: new Uint8Array(p.data ? Object.values(p.data) : []),
           }));
           onUploadSession(parsed.metadata, rehydrated);
-          setCurrentIndex(0);
-          setIsPlaying(false);
+          applyLoadedCapture();
         }
       } catch (err) {
         console.error('Failed to parse fcap bundle', err);
       }
     };
     reader.readAsText(file);
+  };
+
+  const handlePcapUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    if (!engineConnected) {
+      onPcapImportNeedEngine?.();
+      return;
+    }
+    if (onLoadCaptureFile) {
+      void Promise.resolve(onLoadCaptureFile(file)).then(applyLoadedCapture);
+    }
+  };
+
+  const openPcapPicker = () => {
+    if (!engineConnected) {
+      onPcapImportNeedEngine?.();
+      return;
+    }
+    pcapInputRef.current?.click();
   };
 
   const formatMicroseconds = (us: number) => {
@@ -583,21 +609,53 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".fcap,.json"
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors flex items-center gap-1.5"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>载入其他 .fcap 包</span>
-            </button>
+          <div className="flex flex-col items-end gap-1 shrink-0">
+            <div className="flex items-center gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".fcap,.json,.pcap"
+                className="hidden"
+              />
+              <input
+                type="file"
+                ref={pcapInputRef}
+                onChange={handlePcapUpload}
+                accept=".pcap,application/vnd.tcpdump.pcap"
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors flex items-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>载入其他 .fcap 包</span>
+              </button>
+              <button
+                type="button"
+                onClick={openPcapPicker}
+                title={
+                  engineConnected
+                    ? '经引擎导入经典以太网 .pcap（IPv4 UDP/TCP 有载荷）'
+                    : '需连接引擎后才能导入 .pcap'
+                }
+                className={
+                  engineConnected
+                    ? 'px-2.5 py-1 text-xs font-medium text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-md transition-colors flex items-center gap-1.5'
+                    : 'px-2.5 py-1 text-xs font-medium text-slate-400 bg-slate-50 border border-slate-200 rounded-md flex items-center gap-1.5 cursor-not-allowed'
+                }
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>导入 .pcap</span>
+              </button>
+            </div>
+            {!engineConnected && (
+              <p className="text-[10px] text-slate-400 max-w-[16rem] text-right leading-snug">
+                导入 .pcap 需连接引擎；本机侧启发式可能对调 RX/TX，请在报文页核对
+              </p>
+            )}
           </div>
         </div>
 
@@ -619,16 +677,31 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <div className="flex items-start gap-2 text-[11px] text-amber-100">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
               <p>
-                当前会话无数据帧，播放条已禁用。请先在「现场录制」导出包，或点击上方「载入其他 .fcap 包」。
+                当前会话无数据帧，播放条已禁用。请先在「现场录制」导出包，或点击上方「载入其他 .fcap 包」/「导入 .pcap」。
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="shrink-0 px-2.5 py-1 text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md"
-            >
-              载入 .fcap
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-2.5 py-1 text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md"
+              >
+                载入 .fcap
+              </button>
+              <button
+                type="button"
+                onClick={openPcapPicker}
+                className="px-2.5 py-1 text-xs font-medium bg-sky-500/90 hover:bg-sky-400 text-slate-950 rounded-md disabled:opacity-50"
+                disabled={!engineConnected}
+                title={
+                  engineConnected
+                    ? '导入经典 .pcap'
+                    : '需连接引擎'
+                }
+              >
+                导入 .pcap
+              </button>
+            </div>
           </div>
         )}
 

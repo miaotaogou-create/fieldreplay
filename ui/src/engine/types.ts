@@ -162,6 +162,19 @@ export interface EngineTrimResult {
   b64: string;
 }
 
+/** E14d：经典 pcap → 会话 */
+export interface EngineImportPcapResult {
+  imported: boolean;
+  written: number;
+  skipped: number;
+  channelCount: number;
+  packetCount: number;
+  bytes: number;
+  replaced: boolean;
+  b64: string;
+  session: EngineSessionDto;
+}
+
 /** E8a：本机串口枚举 */
 export interface EngineSerialListResult {
   ports: string[];

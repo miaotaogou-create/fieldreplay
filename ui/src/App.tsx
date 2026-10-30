@@ -35,6 +35,21 @@ import type { EngineStartReplayRequest } from './components/DevReplayerView';
 
 const TOAST_MS = 3500;
 
+/** 经典 libpcap 魔数（小端/大端 × 微秒/纳秒）。 */
+function isClassicPcapMagic(buf: Uint8Array): boolean {
+  if (buf.length < 4) return false;
+  const a = buf[0];
+  const b = buf[1];
+  const c = buf[2];
+  const d = buf[3];
+  return (
+    (a === 0xd4 && b === 0xc3 && c === 0xb2 && d === 0xa1)
+    || (a === 0x4d && b === 0x3c && c === 0xb2 && d === 0xa1)
+    || (a === 0xa1 && b === 0xb2 && c === 0xc3 && d === 0xd4)
+    || (a === 0xa1 && b === 0xb2 && c === 0x3c && d === 0x4d)
+  );
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('record');
   const [channels, setChannels] = useState<ChannelConfig[]>(defaultChannels);
@@ -586,6 +601,34 @@ export default function App() {
   const handleLoadCaptureFile = async (file: File) => {
     const engine = engineRef.current;
     const lower = file.name.toLowerCase();
+    const looksPcapName = lower.endsWith('.pcap');
+
+    // E14d：经典 pcap 必须经引擎；未连接不假装本地假导入
+    if (looksPcapName || (engine?.connected && !lower.endsWith('.json') && !lower.endsWith('.fcap'))) {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      if (isClassicPcapMagic(buf) || looksPcapName) {
+        if (!engine?.connected) {
+          showToast('未连引擎：不会本地假导入 .pcap，请先连接引擎');
+          return;
+        }
+        try {
+          const result = await engine.importSessionPcap(buf, file.name);
+          const mapped = mapEngineSession(result.session);
+          setSessionMetadata(mapped.metadata);
+          setRecordedPackets(mapped.packets);
+          showToast(
+            `已导入 pcap：写入 ${result.written} 帧，跳过 ${result.skipped}，` +
+              `${result.channelCount} 路通道（列表 ${mapped.packets.length} 帧）`
+          );
+          return;
+        } catch (e) {
+          showToast(
+            `导入 pcap 失败：${e instanceof Error ? e.message : String(e)}`
+          );
+          return;
+        }
+      }
+    }
 
     if (engine?.connected && (lower.endsWith('.fcap') || !lower.endsWith('.json'))) {
       try {
@@ -641,7 +684,7 @@ export default function App() {
     if (!engine?.connected) {
       showToast('未连接引擎，且无法按 JSON 演示包解析该文件');
     } else {
-      showToast('无法识别为二进制 .fcap 或 JSON 演示包');
+      showToast('无法识别为二进制 .fcap、经典 .pcap 或 JSON 演示包');
     }
   };
 
@@ -697,6 +740,9 @@ export default function App() {
             packets={recordedPackets}
             onUploadSession={handleUploadSession}
             onLoadCaptureFile={handleLoadCaptureFile}
+            onPcapImportNeedEngine={() =>
+              showToast('未连引擎：不会本地假导入 .pcap，请先连接引擎')
+            }
             onSelectPacketForInspection={() => setCurrentTab('packets')}
             engineConnected={engineState === 'connected'}
             engineReplayTick={engineReplayTick}

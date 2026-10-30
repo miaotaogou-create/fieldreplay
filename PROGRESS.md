@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E14 pcap 导入**（E14c 控制面已完成；下一格 E14d UI） |
+| **下一步** | E14 已收口；备选 **E15 / E16 / R1** 现场再选定 |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -174,7 +174,7 @@ fieldreplay/
 | 轨 | 首格 | 内容 | 状态 |
 |----|------|------|------|
 | A **E13** trim+marker | — | E13a–d 全部完成 | **已收口** |
-| B **E14** pcap 导入 | E14d | UI 载入入口 + 手测 | **进行中** |
+| B **E14** pcap 导入 | — | E14a–d 全部完成 | **已收口** |
 | C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
 | D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 | 待命 |
 | E **R1** 回归 | R1a | 手测 E12d 多协议；无新功能 | 待命 |
@@ -195,7 +195,7 @@ fieldreplay/
 | E14a | 需求入库（链路范围、跳过、往返、非目标） | [x] | 2026-10-30：`docs/requirements/20261030-pcap-import.md`；仅以太网经典 pcap + IPv4 UDP/TCP data；与 E10 往返保载荷与相对轴 |
 | E14b | 引擎：pcap→fcap + 自检 | [x] | 2026-10-30：`pcap_bytes_to_session` / `self_check_pcap_import`；E10 往返载荷+相对轴；ARP skipped；全跳过/非以太网拒绝 |
 | E14c | 控制面 import | [x] | 2026-10-30：`session.importPcap`（b64/path；默认替换会话；统计+FCAP b64）；CLI `import-pcap`；自检 WS 写读 |
-| E14d | UI 载入入口 + 手测 | [ ] | |
+| E14d | UI 载入入口 + 手测 | [x] | 2026-10-30：重演页「导入 .pcap」；`session.importPcap`；未连引擎拒绝假导入；`npm run build` 通过 |
 
 #### E15 MQTT mTLS
 
@@ -224,9 +224,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 当前主线 **E14**；只做该轨道 **第一个未勾选** 项（现为 **E14d**）
-2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E13** 已收口；主线 **E14**（E14c 已完成）；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+1. 读 `PROGRESS.md` → **无默认主线**（E14 已收口）；先问用户在 E15 / E16 / R1 中选定一条，再开需求/改代码
+2. 选定后只做该轨道 **第一个未勾选** 项；做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -280,3 +280,4 @@ fieldreplay/
 | 2026-10-30 | **选定 E13** 为下一主线；E13a 需求入库 | 格式已有 marker；现场裁剪/标注价值高；mTLS/录暂停分别缺场景与未拍板戳策略；pcap 导入更大；R1 有引擎自检不挡增强 |
 | 2026-10-30 | E13 全轨收口（含 UI） | 见 `20261030-session-trim-marker.md`；下一主线再次现场选定 |
 | 2026-10-30 | **选定 E14** pcap 导入；E14a 需求入库 | 闭环 E10；仅以太网经典 pcap + IPv4 UDP/TCP data；见 `20261030-pcap-import.md` |
+| 2026-10-30 | E14 全轨收口（含 UI「导入 .pcap」） | 见 `20261030-pcap-import.md`；下一主线再次现场选定（E15/E16/R1） |
