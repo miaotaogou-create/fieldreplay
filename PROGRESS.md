@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E2E Lab** 分步手测；当前 **E2E-1** 本机 RTSP（见 `docs/requirements/20261030-e2e-lab.md`） |
+| **下一步** | **E2E Lab** 分步手测；当前 **E2E-3** TCP 假设备（见 `docs/requirements/20261030-e2e-lab.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -232,8 +232,8 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **R2 / E16 已收口**；**E15 搁置**；无默认主线时先问用户再开新轨
-2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
+1. 读 `PROGRESS.md` → 当前主线 **E2E Lab**（`docs/requirements/20261030-e2e-lab.md`）；产品轨 R2/E16 已收口，**E15 搁置**
+2. 做完勾选、填完成记录、提交推送；E2E 一次只带一格手测
 3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
@@ -241,6 +241,7 @@ fieldreplay/
 7. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
 8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
 9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
+10. **E2E 夹具**：`tools/e2e_lab/`；当前手测 **E2E-3**（先 `03_run_tcp_recv.bat` 再 `03_start_tcp_send.bat`，端口 `57002`）
 
 ## 决策记录（追加）
 

@@ -20,3 +20,15 @@ Fail checks: port `8554` free; `C:\01_Install\bin\ffplay.exe` exists.
 3. Tell the guide "UDP OK" when PASS
 
 RTSP windows from E2E-1 can stay open; not required for this step.
+
+## E2E-3: TCP fake laser
+
+**Order differs from UDP:** listen first (TCP needs accept).
+
+1. Run `03_run_tcp_recv.bat` FIRST — listens `127.0.0.1:57002`
+2. Within a few seconds, run `03_start_tcp_send.bat` (keep open) — sends `LASER,...` lines
+3. Recv window should print several `recv #n : LASER,...` and `PASS`
+4. Tell the guide "TCP OK" when PASS
+
+Port `57002` (not `56xxx`): Hyper-V often reserves `56xxx` for TCP listen.
+UDP E2E-2 can stay open (`56001`).
