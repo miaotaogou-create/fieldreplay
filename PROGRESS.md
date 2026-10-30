@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **R1 已收口**；备选 **E15 / E16** 现场再选定 |
+| **下一步** | **E16 录制暂停**（已选定）；当前 **E16a 需求已入库**，下一格 **E16b** |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -166,7 +166,7 @@ fieldreplay/
 | 录制：添加「视频 RTP」文案无内部任务号 | 通过 | 「RTP/UDP 监听地址（不解编码；RTSP 后置）」 |
 | `npm run lint` | 通过 | `tsc --noEmit` |
 
-### 阶段 X — 备选增强（当前主线：**无**；R1 已收口）
+### 阶段 X — 备选增强（当前主线：**E16 录制暂停**）
 
 > 增强项编号 E8–E12 = 串口 / MQTT 凭据 TLS / pcap 导出 / 多通道 / 多路 sink（与上方早期「重放 E8–E13」编号不同，读全称）。  
 > **选定轨道后**只做该轨道第一格；先需求文档再代码。
@@ -176,7 +176,7 @@ fieldreplay/
 | A **E13** trim+marker | — | E13a–d 全部完成 | **已收口** |
 | B **E14** pcap 导入 | — | E14a–d 全部完成 | **已收口** |
 | C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
-| D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 | 待命 |
+| D **E16** 录制暂停 | E16a | 相对戳**冻结**已拍板；见需求文档 | **进行中**（E16a 完成） |
 | E **R1** 回归 | — | R1a 通过；R1b 无缺陷跳过 | **已收口** |
 
 #### E13 会话 trim + marker
@@ -208,12 +208,12 @@ fieldreplay/
 
 #### E16 录制暂停
 
-| ID | 任务 | 状态 |
-|----|------|------|
-| E16a | 需求入库（相对戳策略 + 多路语义） | [ ] |
-| E16b | 引擎 `record.pause`/`resume` | [ ] |
-| E16c | 控制面 + UI | [ ] |
-| E16d | 自检对齐 E16a | [ ] |
+| ID | 任务 | 状态 | 完成记录 |
+|----|------|------|----------|
+| E16a | 需求入库（相对戳策略 + 多路语义） | [x] | 2026-10-30：`docs/requirements/20261030-record-pause.md`；拍板相对戳冻结；整会话暂停；连接保持并排空不落盘 |
+| E16b | 引擎 `record.pause`/`resume` | [ ] | |
+| E16c | 控制面 + UI | [ ] | |
+| E16d | 自检对齐 E16a | [ ] | |
 
 #### R1 回归
 
@@ -224,9 +224,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **无默认主线**（R1 已收口）；先问用户在 **E15 / E16** 中选定一条，再开需求/改代码
-2. 选定后只做该轨道 **第一个未勾选** 项；做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+1. 读 `PROGRESS.md` → 当前主线 **E16 录制暂停**；只做 **第一个未勾选** 项（现为 **E16b**）
+2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16a** 已收口；规格见 `docs/requirements/20261030-record-pause.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 仍待命
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -283,3 +283,4 @@ fieldreplay/
 | 2026-10-30 | E14 全轨收口（含 UI「导入 .pcap」） | 见 `20261030-pcap-import.md`；下一主线再次现场选定（E15/E16/R1） |
 | 2026-10-30 | **选定 R1** 为下一主线（先于 E15/E16） | E11–E14 连堆后先回归；E15 缺客户 mTLS 场景；E16 相对戳策略未拍板 |
 | 2026-10-30 | R1 收口（R1a 通过 / R1b 无缺陷跳过） | self-check + UI targets 自检 + 文案核对；下一主线再次现场选定（E15/E16） |
+| 2026-10-30 | **选定 E16** 录制暂停；E16a 需求入库 | 相对戳**冻结**（对齐 replay.pause）；整会话；连接保持排空不落盘；E15 缺客户 mTLS 场景且 E9b 已覆盖常见 mqtts；UI 已有暂停缺口 |
