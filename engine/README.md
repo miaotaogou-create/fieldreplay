@@ -56,6 +56,8 @@ fieldreplay-engine replay --in session.fcap --mqtt 192.168.1.10:8883 --mqtt-tls 
 
 REM 导出经典 pcap（UDP/视频/TCP data；串口与 MQTT 跳过）
 fieldreplay-engine export-pcap --in session.fcap --out session.pcap
+REM 导入经典以太网 pcap → .fcap（IPv4 UDP/TCP 有载荷）
+fieldreplay-engine import-pcap --in capture.pcap --out session.fcap
 ```
 
 ## 模块
@@ -63,7 +65,7 @@ fieldreplay-engine export-pcap --in session.fcap --out session.pcap
 | 模块 | 职责 |
 |------|------|
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
-| `pcap` | 经典 libpcap 导出（E10）与导入（E14b：以太网 IPv4 UDP/TCP data） |
+| `pcap` | 经典 libpcap 导出（E10）与导入（E14b/E14c：以太网 IPv4 UDP/TCP data） |
 | `clock` | 录制相对微秒、重放等待 |
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
 | `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；打开失败可读摘要；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
@@ -89,4 +91,4 @@ cargo run -- self-check
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
 MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。  
 pcap 导出：`export-pcap` 或控制面/UI「同时导出 .pcap」；见 `docs/requirements/20261030-pcap-export.md`。  
-pcap 导入：引擎 `pcap_bytes_to_session`（E14b）；控制面/CLI/UI 见 E14c–d、`docs/requirements/20261030-pcap-import.md`。
+pcap 导入：`import-pcap` / 控制面 `session.importPcap`（E14c）；UI 入口见 E14d、`docs/requirements/20261030-pcap-import.md`。

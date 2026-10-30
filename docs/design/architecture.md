@@ -74,7 +74,7 @@
 | `session.open` / `session.load` / `session.clear` | 载入/清空内存会话（E5a）；录制/重放中拒绝 |
 | `session.export` | 将内存会话写成二进制 `.fcap`，响应含 `b64` / `bytes` / `packetCount`；可选 `meta` 对象覆盖 SessionMeta；录制/重放中拒绝（E5d） |
 | `session.exportPcap` | 将内存会话写成经典 `.pcap`（合成以太网；UDP/视频/TCP data；串口/MQTT 跳过），响应含 `b64` / `written` / `skipped`；门禁同 export（E10） |
-| （库）`pcap_bytes_to_session` | E14b：经典以太网 pcap → 通道表+帧（IPv4 UDP/TCP 有载荷）；统计 `written`/`skipped`/`channel_count`；控制面 `session.importPcap` 见 E14c |
+| `session.importPcap` | 经典以太网 `.pcap` → `.fcap`：参数 `b64` 或 `path`（其一）；可选 `sourceHint`、`replaceSession`（默认 true 替换内存会话）；响应含 `written`/`skipped`/`channelCount`/`b64`（FCAP）/`session`；录制/重放中拒绝；无可导入帧失败（E14c）；CLI `import-pcap` |
 | `session.addMarker` | 插入 `kind=marker`：`text`（必填可空）、`relativeUs?`（离线必填）、`ch?`（默认 0）；录制中热写当前相对戳；重放中拒绝；重放不发往 sink（E13b）；UI 重演页播放头 / 录制页热插（E13d） |
 | `session.trim` | 闭区间 `[fromUs,toUs]` 裁出会话：relative 再基、墙钟起点 `+fromUs`、整表保留通道、notes 追加 trim 行；响应含 `b64`/`packetCount`；可选 `replaceSession`；录制/重放中拒绝；非法窗或空窗失败（E13c）；UI 重演页另存下载（E13d） |
 | `record.start` | 启真实通道录制。单路：`type` + `config`；多路（E11a）：`channels:[{type,name?,config},…]`（与单路字段二选一，多路优先）。可选 `out` / `name` / `sessionTitle`。同会话共享墙钟与 `.fcap`；启动期任一路失败则整次失败。UI（E11b）对全部 enabled 通道下发 `channels[]`。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`；`packet.ch` 为通道下标） |

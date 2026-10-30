@@ -117,8 +117,8 @@ E10 已能 **fcap → pcap**（合成以太网，仅 UDP/视频/TCP data）。�
 
 ### E14c（控制面）
 
-- [ ] `session.importPcap`（或等价）门禁正确；统计字段可读
-- [ ] CLI `import-pcap` 写出可 `open` 的 `.fcap`
+- [x] `session.importPcap`（或等价）门禁正确；统计字段可读
+- [x] CLI `import-pcap` 写出可 `open` 的 `.fcap`
 
 ### E14d（UI）
 
@@ -148,4 +148,4 @@ E10 已能 **fcap → pcap**（合成以太网，仅 UDP/视频/TCP data）。�
 
 ## 建议下一手
 
-资深软件工程师：E14c（控制面 `session.importPcap` + CLI `import-pcap`）。新开对话可贴：`新对话读一下进度本，接着做下一步。`
+资深软件工程师：E14d（UI 载入 `.pcap` 入口 + 手测）。新开对话可贴：`新对话读一下进度本，接着做下一步。`

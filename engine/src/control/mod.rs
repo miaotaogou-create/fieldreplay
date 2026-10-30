@@ -4,6 +4,7 @@ mod b64;
 mod dto;
 mod hub;
 mod http_static;
+mod import_pcap;
 mod json_util;
 mod live;
 mod marker;

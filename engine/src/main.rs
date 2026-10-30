@@ -40,6 +40,7 @@ fn run() -> io::Result<()> {
         "record" => cmd_record(args),
         "replay" => cmd_replay(args),
         "export-pcap" => cmd_export_pcap(args),
+        "import-pcap" => cmd_import_pcap(args),
         "serve" => cmd_serve(args),
         "self-check" => cmd_self_check(),
         "help" | "-h" | "--help" => {
@@ -78,6 +79,7 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
                              [--mqtt-user <u>] [--mqtt-password <p>] \\
                              [--mqtt-tls] [--mqtt-ca <pem>] [--mqtt-tls-server-name <名>]
   fieldreplay-engine export-pcap --in <file.fcap> --out <file.pcap>
+  fieldreplay-engine import-pcap --in <file.pcap> --out <file.fcap>
   fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
 
@@ -88,9 +90,60 @@ MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-pref
 可选 --mqtt-tls / --mqtt-ca / --mqtt-tls-server-name（E9b，常用口 8883）。
 RTSP：录=交织 TCP 拉流（E7c）；重放 --rtsp-listen 作服务端按时间轴吐块（E7d；不解 NAL）。
 export-pcap：将 .fcap 中 UDP/视频/TCP 数据帧导出为经典 .pcap（串口/MQTT 跳过）。
+import-pcap：将经典以太网 .pcap（IPv4 UDP/TCP 有载荷）导入为 .fcap。
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
     );
+}
+
+fn cmd_import_pcap(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut in_path: Option<PathBuf> = None;
+    let mut out_path: Option<PathBuf> = None;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--in" => {
+                in_path = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--in 需要路径"))?
+                        .into(),
+                );
+            }
+            "--out" => {
+                out_path = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--out 需要路径"))?
+                        .into(),
+                );
+            }
+            other => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("未知参数: {other}"),
+                ));
+            }
+        }
+    }
+    let in_path = in_path.ok_or_else(|| err_arg("import-pcap 需要 --in"))?;
+    let out_path = out_path.ok_or_else(|| err_arg("import-pcap 需要 --out"))?;
+    let imported = fieldreplay_engine::read_pcap_to_session(&in_path)?;
+    let mut w = SessionWriter::create(
+        &out_path,
+        imported.start_wall_unix_us,
+        &imported.channels,
+        Some(&imported.meta_json),
+    )?;
+    for pkt in &imported.packets {
+        w.append_packet(pkt)?;
+    }
+    w.finalize()?;
+    eprintln!(
+        "已写出 {}（written={} skipped={} channels={}）",
+        out_path.display(),
+        imported.stats.written,
+        imported.stats.skipped,
+        imported.stats.channel_count
+    );
+    Ok(())
 }
 
 fn cmd_export_pcap(mut args: impl Iterator<Item = String>) -> io::Result<()> {

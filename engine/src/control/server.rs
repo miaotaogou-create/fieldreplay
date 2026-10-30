@@ -1,5 +1,5 @@
 //! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
-//! E13b：`session.addMarker`；E13c：`session.trim`。
+//! E13b：`session.addMarker`；E13c：`session.trim`；E14c：`session.importPcap`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -18,6 +18,7 @@ use super::http_static::{self, get_path, is_head, serve_file, serve_no_ui};
 use super::json_util::{
     err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
 };
+use super::import_pcap::handle_session_import_pcap;
 use super::live::{handle_record_start, handle_record_stop};
 use super::marker::handle_session_add_marker;
 use super::replay_live::{
@@ -188,6 +189,7 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
         }
         "session.export" => handle_session_export(&id, msg, state),
         "session.exportPcap" => handle_session_export_pcap(&id, state),
+        "session.importPcap" => handle_session_import_pcap(&id, msg, state),
         "session.addMarker" => handle_session_add_marker(&id, msg, state),
         "session.trim" => handle_session_trim(&id, msg, state),
         "record.start" => match state.lock() {
@@ -524,9 +526,115 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_add_marker_via_ws(&mut client, &path)?;
     // E13c：时间窗 trim（独立多通道样本，不污染后续录制自检）
     self_check_trim_via_ws(&mut client)?;
+    // E14c：pcap 导入（独立样本；默认替换内存会话）
+    self_check_import_pcap_via_ws(&mut client)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
+    Ok(())
+}
+
+/// E14c：写出小 pcap → `session.importPcap` → 校验统计 / FCAP b64 / 内存会话。
+fn self_check_import_pcap_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    use crate::pcap::session_to_pcap_bytes;
+
+    let channels = [ChannelEntry {
+        channel_index: 0,
+        channel_type: ChannelType::Udp,
+        name: "udp0".into(),
+        config_json: r#"{"bind_ip":"127.0.0.1","bind_port":9000}"#.into(),
+    }];
+    let packets = [PacketRecord {
+        relative_us: 0,
+        channel_index: 0,
+        kind: PacketKind::Data,
+        direction: 0,
+        flags: 0,
+        aux: b"10.0.0.2:5000".to_vec(),
+        payload: b"e14c-ws".to_vec(),
+    }];
+    let (pcap, stats) = session_to_pcap_bytes(1_800_000_000_000_000, &channels, &packets)?;
+    if stats.written != 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("E14c 自检导出 written 期望 1，得 {}", stats.written),
+        ));
+    }
+    let pcap_b64 = b64::encode(&pcap);
+
+    write_text_frame_client(
+        client,
+        &format!(
+            r#"{{"id":"e14c1","cmd":"session.importPcap","b64":"{pcap_b64}","sourceHint":"e14c.pcap"}}"#
+        ),
+    )?;
+    let imported = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 session.importPcap 响应")
+    })?;
+    if !imported.contains("\"ok\":true")
+        || !imported.contains("\"imported\":true")
+        || !imported.contains("\"written\":1")
+        || !imported.contains("\"channelCount\":1")
+        || !imported.contains("\"replaced\":true")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("session.importPcap 失败: {imported}"),
+        ));
+    }
+    let expect_payload = b64::encode(b"e14c-ws");
+    if !imported.contains(&expect_payload) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("import 响应缺 payload: {imported}"),
+        ));
+    }
+    let fcap_b64 = extract_str(&imported, "b64").ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "session.importPcap 缺 b64")
+    })?;
+    let fcap_bytes = b64::decode(&fcap_b64).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("import fcap b64 无效: {e}"))
+    })?;
+    if fcap_bytes.len() < 4 || &fcap_bytes[..4] != b"FCAP" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "import 回传非 FCAP",
+        ));
+    }
+    let mut reader = SessionReader::open_bytes(fcap_bytes)?;
+    let got = reader.read_all_packets()?;
+    if got.len() != 1 || got[0].payload.as_slice() != b"e14c-ws" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("import 写出 .fcap 帧不符: len={}", got.len()),
+        ));
+    }
+
+    // 无可导入帧应失败
+    let mut empty = Vec::new();
+    empty.extend_from_slice(&crate::pcap::PCAP_MAGIC_USEC.to_le_bytes());
+    empty.extend_from_slice(&2u16.to_le_bytes());
+    empty.extend_from_slice(&4u16.to_le_bytes());
+    empty.extend_from_slice(&0i32.to_le_bytes());
+    empty.extend_from_slice(&0u32.to_le_bytes());
+    empty.extend_from_slice(&65535u32.to_le_bytes());
+    empty.extend_from_slice(&1u32.to_le_bytes()); // LINKTYPE_ETHERNET
+    let empty_b64 = b64::encode(&empty);
+    write_text_frame_client(
+        client,
+        &format!(r#"{{"id":"e14c-empty","cmd":"session.importPcap","b64":"{empty_b64}"}}"#),
+    )?;
+    let empty_resp = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到空 pcap import 响应")
+    })?;
+    if empty_resp.contains("\"ok\":true") || !empty_resp.contains("无可导入") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("空 pcap 应失败: {empty_resp}"),
+        ));
+    }
+
+    eprintln!("  控制面 session.importPcap 写读：通过");
     Ok(())
 }
 
@@ -1653,7 +1761,7 @@ mod tests {
     use super::self_check_control;
 
     #[test]
-    fn control_plane_self_check_includes_trim() {
-        self_check_control().expect("控制面自检（含 session.trim）");
+    fn control_plane_self_check_includes_trim_and_import_pcap() {
+        self_check_control().expect("控制面自检（含 session.trim / importPcap）");
     }
 }
