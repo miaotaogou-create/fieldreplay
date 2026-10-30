@@ -197,11 +197,17 @@ export class EngineClient {
   }
 
   startRecord(args: {
-    type: string;
+    /** 旧单路；有 `channels` 时引擎优先走多路 */
+    type?: string;
     name?: string;
     out?: string;
     sessionTitle?: string;
-    config: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    channels?: Array<{
+      type: string;
+      name?: string;
+      config: Record<string, unknown>;
+    }>;
   }): Promise<EngineRecordStartResult> {
     return this.request<EngineRecordStartResult>('record.start', args);
   }

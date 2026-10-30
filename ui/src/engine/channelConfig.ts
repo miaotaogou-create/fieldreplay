@@ -65,16 +65,25 @@ export function channelToEngineConfig(ch: ChannelConfig): Record<string, unknown
   }
 }
 
+const ENGINE_RECORD_TYPES = new Set([
+  'udp',
+  'serial',
+  'tcp',
+  'mqtt',
+  'video_stream',
+]);
+
+/** 是否可下发给引擎录制（类型受支持）。 */
+export function isEngineRecordable(ch: ChannelConfig): boolean {
+  return ENGINE_RECORD_TYPES.has(ch.type);
+}
+
+/** E11b：全部 enabled 且引擎支持的通道（顺序即 `channels[]` 下标）。 */
+export function listRecordChannels(channels: ChannelConfig[]): ChannelConfig[] {
+  return channels.filter((c) => c.enabled && isEngineRecordable(c));
+}
+
+/** @deprecated 请用 listRecordChannels；保留给旧调用方 */
 export function pickRecordChannel(channels: ChannelConfig[]): ChannelConfig | null {
-  return (
-    channels.find(
-      (c) =>
-        c.enabled
-        && (c.type === 'udp'
-          || c.type === 'serial'
-          || c.type === 'tcp'
-          || c.type === 'mqtt'
-          || c.type === 'video_stream')
-    ) ?? null
-  );
+  return listRecordChannels(channels)[0] ?? null;
 }

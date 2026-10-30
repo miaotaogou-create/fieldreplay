@@ -74,7 +74,7 @@
 | `session.open` / `session.load` / `session.clear` | 载入/清空内存会话（E5a）；录制/重放中拒绝 |
 | `session.export` | 将内存会话写成二进制 `.fcap`，响应含 `b64` / `bytes` / `packetCount`；可选 `meta` 对象覆盖 SessionMeta；录制/重放中拒绝（E5d） |
 | `session.exportPcap` | 将内存会话写成经典 `.pcap`（合成以太网；UDP/视频/TCP data；串口/MQTT 跳过），响应含 `b64` / `written` / `skipped`；门禁同 export（E10） |
-| `record.start` | 启真实通道录制。单路：`type` + `config`；多路（E11a）：`channels:[{type,name?,config},…]`（与单路字段二选一，多路优先）。可选 `out` / `name` / `sessionTitle`。同会话共享墙钟与 `.fcap`；启动期任一路失败则整次失败。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`） |
+| `record.start` | 启真实通道录制。单路：`type` + `config`；多路（E11a）：`channels:[{type,name?,config},…]`（与单路字段二选一，多路优先）。可选 `out` / `name` / `sessionTitle`。同会话共享墙钟与 `.fcap`；启动期任一路失败则整次失败。UI（E11b）对全部 enabled 通道下发 `channels[]`。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`；`packet.ch` 为通道下标） |
 | `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
 | `replay.start` | 对已载入会话按时间轴重放。单路：`type` + `config`；多路目标（E11c）：`targets:[{ch?,type,config},…]`。UDP `target_ip`/`target_port`；视频同 UDP，或 `mode=rtsp_listen`+`listen_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`（角色由文件取反）；MQTT `broker`/`port` + 可选凭据/TLS 字段。可选 `speed` / `loop` / `fault`。与录制互斥。推送 `replay.progress` 与 `replay.done` |
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位（`loop:true` 时仅 stop/出错才 done） |

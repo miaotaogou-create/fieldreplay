@@ -19,7 +19,7 @@ import { DesktopTitleBar } from './components/DesktopTitleBar';
 import { FieldRecorderView } from './components/FieldRecorderView';
 import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
-import { channelToEngineConfig, pickRecordChannel } from './engine/channelConfig';
+import { channelToEngineConfig } from './engine/channelConfig';
 import { defaultEngineUrl, EngineClient } from './engine/client';
 import {
   replayConfigToEngine,
@@ -59,11 +59,14 @@ export default function App() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toastFnRef = useRef<(msg: string) => void>(() => {});
   const engineRef = useRef<EngineClient | null>(null);
-  const liveChannelRef = useRef<{
-    id: string;
-    name: string;
-    type: ChannelConfig['type'];
-  } | null>(null);
+  /** 当前录制会话：引擎 channel index → UI 通道元数据 */
+  const liveChannelsRef = useRef<
+    Array<{
+      id: string;
+      name: string;
+      type: ChannelConfig['type'];
+    }>
+  >([]);
   const recordStartWallUsRef = useRef(0);
 
   const showToast = (msg: string) => {
@@ -122,9 +125,10 @@ export default function App() {
     client.onStateChange = setEngineState;
     client.onEvent = (ev) => {
       if (ev.event === 'record.packet' && ev.packet) {
-        const ch = liveChannelRef.current ?? {
-          id: `ch_${ev.packet.ch}`,
-          name: `通道 ${ev.packet.ch}`,
+        const idx = ev.packet.ch;
+        const ch = liveChannelsRef.current[idx] ?? {
+          id: `ch_${idx}`,
+          name: `通道 ${idx}`,
           type: 'udp' as const,
         };
         const mapped = mapEnginePacket(
@@ -183,33 +187,53 @@ export default function App() {
     setRecordedPackets((prev) => [...prev, packet]);
   };
 
-  const handleEngineStartRecord = async (channel: ChannelConfig) => {
+  const handleEngineStartRecord = async (selected: ChannelConfig[]) => {
     const engine = engineRef.current;
     if (!engine?.connected) {
       throw new Error('引擎未连接');
     }
-    const config = channelToEngineConfig(channel);
-    liveChannelRef.current = {
-      id: channel.id,
-      name: channel.name,
-      type: channel.type,
-    };
+    if (selected.length === 0) {
+      throw new Error('请至少启用一个可录制通道');
+    }
+    liveChannelsRef.current = selected.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: c.type,
+    }));
     recordStartWallUsRef.current = Date.now() * 1000;
     setRecordedPackets([]);
+    const title =
+      selected.length === 1
+        ? `现场录制-${selected[0].name}`
+        : `现场录制-${selected.length}路`;
     // 新开录制时复位会话元数据，避免重演页仍显示上一包标题（G3）
     setSessionMetadata({
       ...emptySessionMetadata(),
-      sessionTitle: `现场录制-${channel.name}`,
+      sessionTitle: title,
       recordedBy: '现场录制中',
       startTime: new Date().toLocaleString(),
     });
-    await engine.startRecord({
-      type: channel.type,
-      name: channel.name,
-      sessionTitle: `现场录制-${channel.name}`,
-      config,
-    });
-    showToast(`已开始真实录制：${channel.name}（${channel.type}）`);
+    const channelPayloads = selected.map((c) => ({
+      type: c.type,
+      name: c.name,
+      config: channelToEngineConfig(c),
+    }));
+    if (channelPayloads.length === 1) {
+      const only = channelPayloads[0];
+      await engine.startRecord({
+        type: only.type,
+        name: only.name,
+        sessionTitle: title,
+        config: only.config,
+      });
+    } else {
+      await engine.startRecord({
+        sessionTitle: title,
+        channels: channelPayloads,
+      });
+    }
+    const summary = selected.map((c) => `${c.name}(${c.type})`).join('、');
+    showToast(`已开始真实录制：${summary}`);
   };
 
   const handleEngineStopRecord = async () => {
@@ -218,7 +242,7 @@ export default function App() {
       throw new Error('引擎未连接');
     }
     const result = await engine.stopRecord();
-    liveChannelRef.current = null;
+    liveChannelsRef.current = [];
     showToast(
       `录制已停止：${result.packetCount} 帧已写入 ${result.out.split(/[/\\]/).pop()}`
     );
@@ -568,7 +592,6 @@ export default function App() {
             engineConnected={engineState === 'connected'}
             onEngineStartRecord={handleEngineStartRecord}
             onEngineStopRecord={handleEngineStopRecord}
-            pickRecordChannel={pickRecordChannel}
             onListSerialPorts={handleListSerialPorts}
           />
         )}

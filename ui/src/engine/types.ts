@@ -63,7 +63,10 @@ export interface EnginePushEvent {
 export interface EngineRecordStartResult {
   started: boolean;
   out: string;
-  channel: EngineChannelDto;
+  /** 旧单路响应 */
+  channel?: EngineChannelDto;
+  /** E11a 多路响应 */
+  channels?: Array<Pick<EngineChannelDto, 'index' | 'type' | 'name'>>;
 }
 
 export interface EngineRecordStopResult {

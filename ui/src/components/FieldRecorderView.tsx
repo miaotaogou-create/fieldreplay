@@ -29,6 +29,7 @@ import {
   Activity,
   FileCheck,
 } from 'lucide-react';
+import { listRecordChannels } from '../engine/channelConfig';
 
 interface FieldRecorderViewProps {
   channels: ChannelConfig[];
@@ -43,9 +44,8 @@ interface FieldRecorderViewProps {
   ) => void | Promise<void>;
   onGoToReplay: () => void;
   engineConnected: boolean;
-  onEngineStartRecord: (channel: ChannelConfig) => Promise<void>;
+  onEngineStartRecord: (channels: ChannelConfig[]) => Promise<void>;
   onEngineStopRecord: () => Promise<unknown>;
-  pickRecordChannel: (channels: ChannelConfig[]) => ChannelConfig | null;
   /** E8a：向引擎枚举本机 COM */
   onListSerialPorts?: () => Promise<string[]>;
 }
@@ -64,7 +64,6 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   engineConnected,
   onEngineStartRecord,
   onEngineStopRecord,
-  pickRecordChannel,
   onListSerialPorts,
 }) => {
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'paused'>('idle');
@@ -225,15 +224,17 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
 
   const handleStartRecord = async () => {
     if (engineConnected) {
-      const ch = pickRecordChannel(channels);
-      if (!ch) {
-        setLocalHint('请至少启用一个 UDP / 串口 / TCP / MQTT 通道');
+      const selected = listRecordChannels(channels);
+      if (selected.length === 0) {
+        setLocalHint(
+          '请至少启用一个可录制通道（UDP / 串口 / TCP / MQTT / 视频）'
+        );
         return;
       }
       setBusy(true);
       setLocalHint(null);
       try {
-        await onEngineStartRecord(ch);
+        await onEngineStartRecord(selected);
         setElapsedMs(0);
         setRecordState('recording');
       } catch (e) {
@@ -341,6 +342,14 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   const totalBytes = recordedPackets.reduce((acc, p) => acc + p.length, 0);
   const totalMb = (totalBytes / (1024 * 1024)).toFixed(2);
   const approxRateKb = elapsedMs > 0 ? ((totalBytes / (elapsedMs / 1000)) / 1024).toFixed(1) : '0.0';
+  const enabledRecordChannels = listRecordChannels(channels);
+  const packetCountByChannel = recordedPackets.reduce<Record<string, number>>(
+    (acc, p) => {
+      acc[p.channelId] = (acc[p.channelId] ?? 0) + 1;
+      return acc;
+    },
+    {}
+  );
 
   const filteredPackets = recordedPackets.filter((p) => {
     if (filterChannel !== 'all' && p.channelId !== filterChannel) return false;
@@ -469,6 +478,12 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                       ? `RTSP ${chan.params.streamUrl}`
                       : `RTP ${chan.params.ip ?? '0.0.0.0'}:${chan.params.port ?? 5004}`)}
                 </div>
+                {chan.enabled && (
+                  <div className="text-[10px] text-slate-600 font-mono pl-5 mt-0.5">
+                    {packetCountByChannel[chan.id] ?? 0} 帧
+                    {recordState === 'recording' ? ' · 录制中' : ''}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -600,7 +615,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           <div className="flex items-center gap-2 flex-wrap">
             {engineConnected ? (
               <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
-                ● 引擎已连接 · 启停走真实通道（取首个已启用通道）
+                ● 引擎已连接 · 一键录制全部已启用通道（
+                {enabledRecordChannels.length} 路）
               </span>
             ) : (
               <>
