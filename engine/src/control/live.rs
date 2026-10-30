@@ -289,38 +289,54 @@ pub fn handle_record_stop(
     active.stop.store(true, Ordering::SeqCst);
     let join = active.join.take();
     let out = active.out_path.clone();
+    let fallback_count = active.packet_count.load(Ordering::SeqCst);
 
-    let count = match join {
+    // 线程已因 RTSP/IO 等失败时仍视为「已停止」：会话槽已 take，勿再回 err
+    // （否则 UI 卡在录制中；再点则变成「当前未在录制」）。
+    let (count, thread_warning) = match join {
         Some(h) => match h.join() {
-            Ok(Ok(n)) => n,
-            Ok(Err(e)) => {
-                return err_result(id, &format!("录制线程失败: {e}"));
-            }
-            Err(_) => return err_result(id, "录制线程异常退出"),
+            Ok(Ok(n)) => (n, None),
+            Ok(Err(e)) => (fallback_count, Some(format!("录制线程失败: {e}"))),
+            Err(_) => (fallback_count, Some("录制线程异常退出".into())),
         },
-        None => active.packet_count.load(Ordering::SeqCst),
+        None => (fallback_count, None),
     };
 
     match load_recorded_session(&out) {
         Ok(loaded) => {
             let duration_us = loaded.duration_us;
+            let count = if loaded.packets.is_empty() {
+                count
+            } else {
+                loaded.packets.len() as u64
+            };
             *session_slot = Some(loaded);
+            let warn_json = thread_warning
+                .as_ref()
+                .map(|w| format!(",\"warning\":\"{}\"", escape_str(w)))
+                .unwrap_or_default();
             ok_result(
                 id,
                 &format!(
-                    "{{\"stopped\":true,\"out\":\"{}\",\"packetCount\":{count},\"durationUs\":{duration_us},\"finalized\":true}}",
+                    "{{\"stopped\":true,\"out\":\"{}\",\"packetCount\":{count},\"durationUs\":{duration_us},\"finalized\":true{warn_json}}}",
                     escape_str(&out.to_string_lossy())
                 ),
             )
         }
-        Err(e) => ok_result(
-            id,
-            &format!(
-                "{{\"stopped\":true,\"out\":\"{}\",\"packetCount\":{count},\"durationUs\":0,\"finalized\":false,\"warning\":\"{}\"}}",
-                escape_str(&out.to_string_lossy()),
-                escape_str(&e.to_string())
-            ),
-        ),
+        Err(e) => {
+            let detail = match thread_warning {
+                Some(w) => format!("{w}; 未能装载: {e}"),
+                None => e.to_string(),
+            };
+            ok_result(
+                id,
+                &format!(
+                    "{{\"stopped\":true,\"out\":\"{}\",\"packetCount\":{count},\"durationUs\":0,\"finalized\":false,\"warning\":\"{}\"}}",
+                    escape_str(&out.to_string_lossy()),
+                    escape_str(&detail)
+                ),
+            )
+        }
     }
 }
 

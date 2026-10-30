@@ -70,8 +70,7 @@ during this step — FieldReplay replaces those receivers.
 
 ### C. Channel setup in UI (录制页)
 
-Default demo channels use wrong ports / COM3 — **turn them all OFF**.
-Then **添加自定义端口** for lab channels only:
+Start with **empty** channels (no demo presets). Use **添加通道**:
 
 | Name | Type | Param |
 |------|------|-------|
@@ -80,7 +79,7 @@ Then **添加自定义端口** for lab channels only:
 | e2e-mqtt | MQTT | `127.0.0.1:1883, e2e/sensor` (TLS off) |
 | e2e-video | 视频 RTP | `rtsp://127.0.0.1:8554/live/cam1` (optional) |
 
-Leave serial disabled (no COM needed).
+Do not add serial unless you have a COM pair.
 
 ### D. Record + export
 

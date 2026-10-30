@@ -64,6 +64,8 @@ export default function App() {
     durationUs: number;
   } | null>(null);
   const [engineReplayDoneSeq, setEngineReplayDoneSeq] = useState(0);
+  /** 引擎推送 record.error 时递增，录制页强制回 idle */
+  const [recordFaultSeq, setRecordFaultSeq] = useState(0);
   const [isMaximized, setIsMaximized] = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
 
@@ -151,6 +153,24 @@ export default function App() {
         setRecordedPackets((prev) => [...prev, mapped]);
       } else if (ev.event === 'record.error' && ev.error) {
         toastFnRef.current(`录制错误：${ev.error}`);
+        setRecordFaultSeq((n) => n + 1);
+        // 线程已失败但仍占 ActiveRecording：主动 stop 装载已写入 .fcap
+        const eng = engineRef.current;
+        if (eng?.connected) {
+          void eng
+            .stopRecord()
+            .then((result) => {
+              liveChannelsRef.current = [];
+              toastFnRef.current(
+                result.warning
+                  ? `录制已中断并停止（${result.packetCount} 帧）：${result.warning}`
+                  : `录制已中断并停止：${result.packetCount} 帧`
+              );
+            })
+            .catch(() => {
+              /* 可能已停；UI 已回 idle */
+            });
+        }
       } else if (ev.event === 'replay.progress') {
         setEngineReplayTick({
           sent: ev.sent ?? 0,
@@ -255,8 +275,11 @@ export default function App() {
     }
     const result = await engine.stopRecord();
     liveChannelsRef.current = [];
+    const file = result.out.split(/[/\\]/).pop();
     showToast(
-      `录制已停止：${result.packetCount} 帧已写入 ${result.out.split(/[/\\]/).pop()}`
+      result.warning
+        ? `录制已停止（${result.packetCount} 帧 / ${file}）：${result.warning}`
+        : `录制已停止：${result.packetCount} 帧已写入 ${file}`
     );
     return result;
   };
@@ -753,6 +776,7 @@ export default function App() {
             onEngineResumeRecord={handleEngineResumeRecord}
             onListSerialPorts={handleListSerialPorts}
             onAddMarkerLive={handleAddMarkerLive}
+            recordFaultSeq={recordFaultSeq}
           />
         )}
 

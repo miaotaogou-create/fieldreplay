@@ -54,6 +54,8 @@ interface FieldRecorderViewProps {
   onListSerialPorts?: () => Promise<string[]>;
   /** E13d：录制中热插 marker（省略 relativeUs）；暂停中亦允许 */
   onAddMarkerLive?: (text: string) => void | Promise<void>;
+  /** App 在收到 record.error 后递增；强制结束本地「录制中」态 */
+  recordFaultSeq?: number;
 }
 
 const FALLBACK_SERIAL_PORTS = ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11'];
@@ -74,9 +76,11 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   onEngineResumeRecord,
   onListSerialPorts,
   onAddMarkerLive,
+  recordFaultSeq = 0,
 }) => {
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'paused'>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
+  const lastFaultSeqRef = useRef(0);
   const [liveMarkerText, setLiveMarkerText] = useState('');
   // 引擎已连接时默认关模拟；未连接时保留离线演示
   const [simulateHardwareStream, setSimulateHardwareStream] = useState(!engineConnected);
@@ -224,6 +228,15 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     }
   }, [recordedPackets, autoScroll]);
 
+  // 引擎 record.error：结束本地录制态（会话可能仍待 stop 装载）
+  useEffect(() => {
+    if (recordFaultSeq === lastFaultSeqRef.current) return;
+    lastFaultSeqRef.current = recordFaultSeq;
+    if (recordFaultSeq <= 0) return;
+    setRecordState('idle');
+    setLocalHint('录制已因错误中断；引擎会尝试停止并装载已写入数据，可用「导出现场包」导出');
+  }, [recordFaultSeq]);
+
   // 用户上翻离开底部 → 切到自由浏览；回到底部可再锁
   const handleLogScroll = () => {
     const el = logContainerRef.current;
@@ -303,15 +316,41 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     if (engineConnected && recordState !== 'idle') {
       setBusy(true);
       try {
-        await onEngineStopRecord();
+        const reply = await onEngineStopRecord();
         setRecordState('idle');
+        const warn =
+          reply && typeof reply === 'object' && 'warning' in reply
+            ? String((reply as { warning?: unknown }).warning ?? '')
+            : '';
+        if (warn) setLocalHint(warn);
         setIsExportModalOpen(true);
       } catch (e) {
-        setLocalHint(e instanceof Error ? e.message : String(e));
+        const msg = e instanceof Error ? e.message : String(e);
+        // 引擎已摘会话（「未在录制」/线程失败旧路径）时仍回 idle，避免假「录制中」
+        setRecordState('idle');
+        setLocalHint(msg);
+        if (recordedPackets.length > 0) setIsExportModalOpen(true);
       } finally {
         setBusy(false);
       }
       return;
+    }
+    // 错误中断后 recordState 可能已 idle，仍允许再调 stop 装载 / 打开导出
+    if (engineConnected) {
+      setBusy(true);
+      try {
+        const reply = await onEngineStopRecord();
+        const warn =
+          reply && typeof reply === 'object' && 'warning' in reply
+            ? String((reply as { warning?: unknown }).warning ?? '')
+            : '';
+        if (warn) setLocalHint(warn);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/未在录制/.test(msg)) setLocalHint(msg);
+      } finally {
+        setBusy(false);
+      }
     }
     setRecordState('idle');
     setIsExportModalOpen(true);
@@ -451,7 +490,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           <div className="flex items-center gap-2 text-[11px] text-slate-500">
             <span className="flex items-center gap-1 font-medium text-slate-700">
               <span className="w-4 h-4 rounded-full bg-slate-900 text-white flex items-center justify-center text-[9px]">1</span>
-              勾选信道
+              添加信道
             </span>
             <span className="text-slate-300">→</span>
             <span className="flex items-center gap-1 font-medium text-slate-700">
@@ -477,9 +516,22 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
-              添加自定义端口
+              添加通道
             </button>
           </div>
+
+          {channels.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setShowAddChannelModal(true)}
+              className="w-full mb-2 px-3 py-4 rounded-lg border border-dashed border-slate-300 bg-slate-50/80 text-left hover:border-sky-400 hover:bg-sky-50/50 transition-colors"
+            >
+              <div className="text-xs font-medium text-slate-700">尚无通道</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                按现场项目自行添加 UDP / TCP / MQTT / 串口 / 视频，无预置演示口
+              </div>
+            </button>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 max-h-[22vh] overflow-y-auto">
             {channels.map((chan) => (
@@ -991,7 +1043,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
             onSubmit={handleCreateChannel}
             className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs"
           >
-            <h3 className="text-base font-bold text-slate-900">添加自定义输入通道</h3>
+            <h3 className="text-base font-bold text-slate-900">添加输入通道</h3>
             <div>
               <label className="block font-medium text-slate-700 mb-1">通道名称</label>
               <input
