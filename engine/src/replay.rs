@@ -29,13 +29,15 @@ pub struct ReplayOptions {
 
 pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
     let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
     let mut on: OnReplayProgress<'_> = None;
-    replay_udp_from_file_with(opts, &stop, &mut on)
+    replay_udp_from_file_with(opts, &stop, &paused, &mut on)
 }
 
 pub fn replay_udp_from_file_with(
     opts: &ReplayOptions,
     stop: &AtomicBool,
+    paused: &AtomicBool,
     on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
@@ -55,7 +57,7 @@ pub fn replay_udp_from_file_with(
     }
 
     let sock = bind_sender(opts.local_bind)?;
-    let base = Instant::now();
+    let mut base = Instant::now();
     let mut sent = 0u64;
 
     let speed = SessionClock::clamp_speed(opts.speed);
@@ -81,7 +83,13 @@ pub fn replay_udp_from_file_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Udp) {
             continue;
         }
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(
+            &mut base,
+            pkt.relative_us,
+            speed,
+            stop,
+            paused,
+        ) {
             break;
         }
         send_to(&sock, &pkt.payload, opts.target)?;
@@ -121,8 +129,9 @@ pub fn replay_serial_from_file(opts: &SerialReplayOptions) -> io::Result<u64> {
         std::time::Duration::from_millis(200),
     )?;
     let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
     let mut on: OnReplayProgress<'_> = None;
-    replay_serial_with_port_with(opts, &port, &stop, &mut on)
+    replay_serial_with_port_with(opts, &port, &stop, &paused, &mut on)
 }
 
 pub fn replay_serial_with_port(
@@ -130,14 +139,16 @@ pub fn replay_serial_with_port(
     port: &SerialPort,
 ) -> io::Result<u64> {
     let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
     let mut on: OnReplayProgress<'_> = None;
-    replay_serial_with_port_with(opts, port, &stop, &mut on)
+    replay_serial_with_port_with(opts, port, &stop, &paused, &mut on)
 }
 
 pub fn replay_serial_with_port_with(
     opts: &SerialReplayOptions,
     port: &SerialPort,
     stop: &AtomicBool,
+    paused: &AtomicBool,
     on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
@@ -156,7 +167,7 @@ pub fn replay_serial_with_port_with(
         ));
     }
 
-    let base = Instant::now();
+    let mut base = Instant::now();
     let mut sent = 0u64;
     let speed = SessionClock::clamp_speed(opts.speed);
 
@@ -182,7 +193,13 @@ pub fn replay_serial_with_port_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Serial) {
             continue;
         }
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(
+            &mut base,
+            pkt.relative_us,
+            speed,
+            stop,
+            paused,
+        ) {
             break;
         }
         port.write_all(&pkt.payload)?;
@@ -210,13 +227,15 @@ pub fn replay_tcp_from_file(
     opts: &TcpReplayOptions,
     stop: &AtomicBool,
 ) -> io::Result<u64> {
+    let paused = AtomicBool::new(false);
     let mut on: OnReplayProgress<'_> = None;
-    replay_tcp_from_file_with(opts, stop, &mut on)
+    replay_tcp_from_file_with(opts, stop, &paused, &mut on)
 }
 
 pub fn replay_tcp_from_file_with(
     opts: &TcpReplayOptions,
     stop: &AtomicBool,
+    paused: &AtomicBool,
     on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
@@ -244,7 +263,7 @@ pub fn replay_tcp_from_file_with(
         speed
     );
 
-    let base = Instant::now();
+    let mut base = Instant::now();
     let mut sent = 0u64;
     let mut stream = None;
 
@@ -261,7 +280,13 @@ pub fn replay_tcp_from_file_with(
             continue;
         }
 
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(
+            &mut base,
+            pkt.relative_us,
+            speed,
+            stop,
+            paused,
+        ) {
             break;
         }
 
@@ -332,13 +357,15 @@ pub struct MqttReplayOptions {
 /// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
 pub fn replay_mqtt_from_file(opts: &MqttReplayOptions) -> io::Result<u64> {
     let stop = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
     let mut on: OnReplayProgress<'_> = None;
-    replay_mqtt_from_file_with(opts, &stop, &mut on)
+    replay_mqtt_from_file_with(opts, &stop, &paused, &mut on)
 }
 
 pub fn replay_mqtt_from_file_with(
     opts: &MqttReplayOptions,
     stop: &AtomicBool,
+    paused: &AtomicBool,
     on_progress: &mut OnReplayProgress<'_>,
 ) -> io::Result<u64> {
     let mut reader = SessionReader::open(&opts.in_path)?;
@@ -373,7 +400,7 @@ pub fn replay_mqtt_from_file_with(
     );
 
     let mut client = MqttClient::connect(&config, opts.poll_timeout)?;
-    let base = Instant::now();
+    let mut base = Instant::now();
     let mut sent = 0u64;
 
     reader.rewind_packets()?;
@@ -398,7 +425,13 @@ pub fn replay_mqtt_from_file_with(
             .unwrap_or_else(|| mqtt_qos_from_flags(pkt.flags));
         let retain = mqtt_retain_from_flags(pkt.flags);
 
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(
+            &mut base,
+            pkt.relative_us,
+            speed,
+            stop,
+            paused,
+        ) {
             break;
         }
         client.publish(&topic, &pkt.payload, qos, retain)?;

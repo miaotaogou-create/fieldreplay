@@ -44,6 +44,8 @@ interface DevReplayerViewProps {
     cfg: ReplayConfig
   ) => Promise<void>;
   onEngineStopReplay?: () => Promise<unknown>;
+  onEnginePauseReplay?: () => Promise<unknown>;
+  onEngineResumeReplay?: () => Promise<unknown>;
 }
 
 export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
@@ -57,8 +59,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   engineReplayDoneSeq = 0,
   onEngineStartReplay,
   onEngineStopReplay,
+  onEnginePauseReplay,
+  onEngineResumeReplay,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
+  /** 引擎重放已启动且处于暂停（时间轴冻结）；离线 mock 不用此态 */
+  const [isPaused, setIsPaused] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [replaySpeed, setReplaySpeed] = useState<number>(1.0);
   const [isLooping, setIsLooping] = useState(true);
@@ -112,7 +118,13 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   const timerRef = useRef<any>(null);
   const engineBusyRef = useRef(false);
   const hasPackets = packets.length > 0;
-  const useEngineReplay = engineConnected && !!onEngineStartReplay && !!onEngineStopReplay;
+  const useEngineReplay =
+    engineConnected
+    && !!onEngineStartReplay
+    && !!onEngineStopReplay
+    && !!onEnginePauseReplay
+    && !!onEngineResumeReplay;
+  const engineBusy = useEngineReplay && (isPlaying || isPaused);
 
   const totalDurationUs = hasPackets ? packets[packets.length - 1].timestampUs : 0;
   const safeIndex = hasPackets ? Math.min(currentIndex, packets.length - 1) : 0;
@@ -124,6 +136,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   // 会话包变更时复位播放头与推送日志，避免越界
   useEffect(() => {
     setIsPlaying(false);
+    setIsPaused(false);
     setCurrentIndex(0);
     setDispatchedPackets([]);
   }, [sessionMetadata.sessionTitle, packets.length]);
@@ -165,6 +178,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   useEffect(() => {
     if (!useEngineReplay || engineReplayDoneSeq === 0) return;
     setIsPlaying(false);
+    setIsPaused(false);
     engineBusyRef.current = false;
   }, [engineReplayDoneSeq, useEngineReplay]);
 
@@ -227,9 +241,25 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       if (engineBusyRef.current) return;
       if (isPlaying) {
         engineBusyRef.current = true;
-        void onEngineStopReplay!()
+        void onEnginePauseReplay!()
           .then(() => {
             setIsPlaying(false);
+            setIsPaused(true);
+          })
+          .catch((e) => {
+            console.error(e);
+          })
+          .finally(() => {
+            engineBusyRef.current = false;
+          });
+        return;
+      }
+      if (isPaused) {
+        engineBusyRef.current = true;
+        void onEngineResumeReplay!()
+          .then(() => {
+            setIsPlaying(true);
+            setIsPaused(false);
           })
           .catch((e) => {
             console.error(e);
@@ -242,6 +272,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       engineBusyRef.current = true;
       setCurrentIndex(0);
       setDispatchedPackets([]);
+      setIsPaused(false);
       void onEngineStartReplay!(activeTargetTab, replayConfig)
         .then(() => {
           setIsPlaying(true);
@@ -249,6 +280,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         .catch((e) => {
           console.error(e);
           setIsPlaying(false);
+          setIsPaused(false);
         })
         .finally(() => {
           engineBusyRef.current = false;
@@ -262,28 +294,31 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   };
 
   const handleReset = () => {
-    if (useEngineReplay && isPlaying) {
+    if (useEngineReplay && (isPlaying || isPaused)) {
       void onEngineStopReplay?.().catch(() => undefined);
     }
     setIsPlaying(false);
+    setIsPaused(false);
     setCurrentIndex(0);
   };
 
   const handleStepForward = () => {
-    if (!hasPackets || (useEngineReplay && isPlaying)) return;
+    if (!hasPackets || engineBusy) return;
     setIsPlaying(false);
+    setIsPaused(false);
     setCurrentIndex((prev) => Math.min(packets.length - 1, prev + 1));
   };
 
   const handleStepBack = () => {
-    if (!hasPackets || (useEngineReplay && isPlaying)) return;
+    if (!hasPackets || engineBusy) return;
     setIsPlaying(false);
+    setIsPaused(false);
     setCurrentIndex((prev) => Math.max(0, prev - 1));
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!hasPackets || totalDurationUs <= 0) return;
-    if (useEngineReplay && isPlaying) return;
+    if (engineBusy) return;
     const val = parseFloat(e.target.value);
     const targetUs = (val / 100) * totalDurationUs;
     // Find closest packet index
@@ -313,6 +348,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       void Promise.resolve(onLoadCaptureFile(file)).then(() => {
         setCurrentIndex(0);
         setIsPlaying(false);
+        setIsPaused(false);
       });
       return;
     }
@@ -485,10 +521,10 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <button
               type="button"
               onClick={handleStepBack}
-              disabled={!hasPackets || (useEngineReplay && isPlaying)}
+              disabled={!hasPackets || engineBusy}
               title={
-                useEngineReplay && isPlaying
-                  ? '引擎重放中不可单步'
+                engineBusy
+                  ? '引擎重放中不可单步（可先暂停后复位）'
                   : '逐帧单步后退'
               }
               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"
@@ -509,12 +545,18 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               {isPlaying ? (
                 <>
                   <Pause className="w-3.5 h-3.5" />
-                  <span>{useEngineReplay ? '停止重演' : '暂停重演'}</span>
+                  <span>暂停重演</span>
                 </>
               ) : (
                 <>
                   <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>{useEngineReplay ? '引擎重演' : '高保真重演'}</span>
+                  <span>
+                    {useEngineReplay
+                      ? isPaused
+                        ? '继续重演'
+                        : '引擎重演'
+                      : '高保真重演'}
+                  </span>
                 </>
               )}
             </button>
@@ -522,10 +564,10 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <button
               type="button"
               onClick={handleStepForward}
-              disabled={!hasPackets || (useEngineReplay && isPlaying)}
+              disabled={!hasPackets || engineBusy}
               title={
-                useEngineReplay && isPlaying
-                  ? '引擎重放中不可单步'
+                engineBusy
+                  ? '引擎重放中不可单步（可先暂停后复位）'
                   : '逐帧单步前进（微秒级步进）'
               }
               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800"

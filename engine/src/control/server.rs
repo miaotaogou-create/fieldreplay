@@ -16,7 +16,9 @@ use super::hub::PushHub;
 use super::http_static::{self, get_path, is_head, serve_file, serve_no_ui};
 use super::json_util::{err_result, escape_str, extract_object, extract_str, ok_result};
 use super::live::{handle_record_start, handle_record_stop};
-use super::replay_live::{handle_replay_start, handle_replay_stop};
+use super::replay_live::{
+    handle_replay_pause, handle_replay_resume, handle_replay_start, handle_replay_stop,
+};
 use super::session_file::export_session_bytes;
 use super::state::{ControlState, LoadedSession};
 use super::ws::{
@@ -210,6 +212,14 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
                 g.reap_finished_replay();
                 handle_replay_start(&id, msg, &mut g, hub)
             }
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "replay.pause" => match state.lock() {
+            Ok(mut g) => handle_replay_pause(&id, &mut g),
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "replay.resume" => match state.lock() {
+            Ok(mut g) => handle_replay_resume(&id, &mut g),
             Err(_) => err_result(&id, "状态锁损坏"),
         },
         "replay.stop" => {
@@ -415,6 +425,7 @@ pub fn self_check_control() -> io::Result<()> {
 
     // E5c：先测重放（会话仍是 sample.fcap），再测录制（会覆盖内存会话）
     self_check_replay_via_ws(&mut client, &path)?;
+    self_check_replay_pause_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
@@ -661,6 +672,104 @@ fn self_check_replay_via_ws(client: &mut TcpStream, session_path: &Path) -> io::
 
     eprintln!("  控制面 replay.start UDP 环回：通过");
     Ok(())
+}
+
+/// 验证 `replay.pause` / `resume`：暂停后 status 带 paused，恢复后可正常 stop。
+fn self_check_replay_pause_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let recv = UdpSocket::bind("127.0.0.1:0")?;
+    recv.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let target = recv.local_addr()?;
+
+    let open = format!(
+        r#"{{"id":"p0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "pause 自检未收到 session.open")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pause 自检 session.open 失败: {opened}"),
+        ));
+    }
+
+    // 0.1x 拉长墙钟间隔，便于抢在首帧前/间暂停
+    let start = format!(
+        r#"{{"id":"p1","cmd":"replay.start","type":"udp","speed":0.1,"config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        target.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "pause 自检未收到 replay.start")
+    })?;
+    if !started.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pause 自检 replay.start 失败: {started}"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"p2","cmd":"replay.pause"}"#)?;
+    let paused = drain_until_id(client, "p2")?;
+    if !paused.contains("\"ok\":true") || !paused.contains("\"paused\":true") {
+        let _ = write_text_frame_client(client, r#"{"id":"px","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("replay.pause 失败: {paused}"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"p3","cmd":"status"}"#)?;
+    let st = drain_until_id(client, "p3")?;
+    if !st.contains("\"paused\":true") {
+        let _ = write_text_frame_client(client, r#"{"id":"px","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("暂停后 status 应含 paused:true: {st}"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"p4","cmd":"replay.resume"}"#)?;
+    let resumed = drain_until_id(client, "p4")?;
+    if !resumed.contains("\"ok\":true") || !resumed.contains("\"paused\":false") {
+        let _ = write_text_frame_client(client, r#"{"id":"px","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("replay.resume 失败: {resumed}"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"p5","cmd":"replay.stop"}"#)?;
+    let stopped = drain_until_id(client, "p5")?;
+    if !stopped.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("pause 自检 replay.stop 失败: {stopped}"),
+        ));
+    }
+
+    eprintln!("  控制面 replay.pause/resume：通过");
+    Ok(())
+}
+
+/// 读到匹配 `id` 的响应；其间丢弃推送事件。
+fn drain_until_id(client: &mut TcpStream, id: &str) -> io::Result<String> {
+    let needle = format!("\"id\":\"{id}\"");
+    client.set_read_timeout(Some(Duration::from_secs(3)))?;
+    for _ in 0..32 {
+        let frame = read_text_frame(client)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::UnexpectedEof, format!("等待 id={id} 时连接关闭"))
+        })?;
+        if frame.contains(&needle) {
+            return Ok(frame);
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        format!("未等到 id={id} 的响应"),
+    ))
 }
 
 fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {

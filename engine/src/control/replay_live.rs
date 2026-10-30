@@ -1,4 +1,4 @@
-//! 控制面实时重放：`replay.start` / `replay.stop`，经 PushHub 推送进度。
+//! 控制面实时重放：`replay.start` / `replay.pause` / `replay.resume` / `replay.stop`，经 PushHub 推送进度。
 
 use std::io;
 use std::net::SocketAddr;
@@ -72,10 +72,12 @@ pub fn handle_replay_start(
     };
 
     let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
     let finished = Arc::new(AtomicBool::new(false));
     let sent_count = Arc::new(AtomicU64::new(0));
     let hub_c = Arc::clone(hub);
     let stop_c = Arc::clone(&stop);
+    let paused_c = Arc::clone(&paused);
     let finished_c = Arc::clone(&finished);
     let sent_c = Arc::clone(&sent_count);
     let ty_c = ty.clone();
@@ -92,6 +94,7 @@ pub fn handle_replay_start(
             duration_us,
             speed,
             &stop_c,
+            &paused_c,
             &sent_c,
             &hub_c,
         );
@@ -108,6 +111,7 @@ pub fn handle_replay_start(
 
     state.replaying = Some(ActiveReplay {
         stop,
+        paused,
         finished,
         channel_type: ty.clone(),
         sent_count,
@@ -129,6 +133,30 @@ pub fn handle_replay_start(
     )
 }
 
+pub fn handle_replay_pause(id: &str, state: &mut ControlState) -> String {
+    state.reap_finished_replay();
+    let Some(active) = state.replaying.as_ref() else {
+        return err_result(id, "当前未在重放");
+    };
+    if active.paused.load(Ordering::SeqCst) {
+        return ok_result(id, "{\"paused\":true,\"already\":true}");
+    }
+    active.paused.store(true, Ordering::SeqCst);
+    ok_result(id, "{\"paused\":true}")
+}
+
+pub fn handle_replay_resume(id: &str, state: &mut ControlState) -> String {
+    state.reap_finished_replay();
+    let Some(active) = state.replaying.as_ref() else {
+        return err_result(id, "当前未在重放");
+    };
+    if !active.paused.load(Ordering::SeqCst) {
+        return ok_result(id, "{\"paused\":false,\"already\":true}");
+    }
+    active.paused.store(false, Ordering::SeqCst);
+    ok_result(id, "{\"paused\":false}")
+}
+
 pub fn handle_replay_stop(
     id: &str,
     state_replaying: &mut Option<ActiveReplay>,
@@ -136,6 +164,8 @@ pub fn handle_replay_stop(
     let Some(mut active) = state_replaying.take() else {
         return err_result(id, "当前未在重放");
     };
+    // 若卡在暂停等待，先解除以便线程能看到 stop
+    active.paused.store(false, Ordering::SeqCst);
     active.stop.store(true, Ordering::SeqCst);
     let join = active.join.take();
 
@@ -188,6 +218,7 @@ fn run_replay(
     duration_us: u64,
     speed: f64,
     stop: &AtomicBool,
+    paused: &AtomicBool,
     sent_count: &Arc<AtomicU64>,
     hub: &Arc<PushHub>,
 ) -> io::Result<u64> {
@@ -211,7 +242,7 @@ fn run_replay(
                 local_bind: "0.0.0.0:0".parse().unwrap(),
                 speed,
             };
-            replay_udp_from_file_with(&opts, stop, &mut on)
+            replay_udp_from_file_with(&opts, stop, paused, &mut on)
         }
         "serial" => {
             let cfg = parse_serial(config)?;
@@ -221,7 +252,7 @@ fn run_replay(
                 speed,
             };
             let port = SerialPort::open(&opts.config, poll)?;
-            replay_serial_with_port_with(&opts, &port, stop, &mut on)
+            replay_serial_with_port_with(&opts, &port, stop, paused, &mut on)
         }
         "tcp" => {
             let endpoint = parse_tcp_endpoint(config)?;
@@ -231,7 +262,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
             };
-            replay_tcp_from_file_with(&opts, stop, &mut on)
+            replay_tcp_from_file_with(&opts, stop, paused, &mut on)
         }
         "mqtt" => {
             let broker = parse_mqtt_broker(config)?;
@@ -250,7 +281,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
             };
-            replay_mqtt_from_file_with(&opts, stop, &mut on)
+            replay_mqtt_from_file_with(&opts, stop, paused, &mut on)
         }
         other => Err(io::Error::new(
             io::ErrorKind::InvalidInput,

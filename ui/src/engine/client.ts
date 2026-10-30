@@ -10,6 +10,8 @@ import {
   EnginePushEvent,
   EngineRecordStartResult,
   EngineRecordStopResult,
+  EngineReplayPauseResult,
+  EngineReplayResumeResult,
   EngineReplayStartResult,
   EngineReplayStopResult,
   EngineRpcErr,
@@ -199,6 +201,14 @@ export class EngineClient {
 
   stopReplay(): Promise<EngineReplayStopResult> {
     return this.request<EngineReplayStopResult>('replay.stop', {});
+  }
+
+  pauseReplay(): Promise<EngineReplayPauseResult> {
+    return this.request<EngineReplayPauseResult>('replay.pause', {});
+  }
+
+  resumeReplay(): Promise<EngineReplayResumeResult> {
+    return this.request<EngineReplayResumeResult>('replay.resume', {});
   }
 }
 

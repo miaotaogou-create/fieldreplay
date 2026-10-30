@@ -87,6 +87,16 @@ export interface EngineReplayStopResult {
   sent: number;
 }
 
+export interface EngineReplayPauseResult {
+  paused: boolean;
+  already?: boolean;
+}
+
+export interface EngineReplayResumeResult {
+  paused: boolean;
+  already?: boolean;
+}
+
 export interface EngineSessionExportResult {
   exported: boolean;
   packetCount: number;

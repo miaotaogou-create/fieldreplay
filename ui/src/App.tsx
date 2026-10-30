@@ -258,6 +258,26 @@ export default function App() {
     return result;
   };
 
+  const handleEnginePauseReplay = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.pauseReplay();
+    showToast(result.already ? '已处于暂停' : '重放已暂停');
+    return result;
+  };
+
+  const handleEngineResumeReplay = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.resumeReplay();
+    showToast(result.already ? '已在播放' : '重放已继续');
+    return result;
+  };
+
   const handleClearSession = () => {
     setRecordedPackets([]);
     setSessionMetadata(emptySessionMetadata());
@@ -471,6 +491,8 @@ export default function App() {
             engineReplayDoneSeq={engineReplayDoneSeq}
             onEngineStartReplay={handleEngineStartReplay}
             onEngineStopReplay={handleEngineStopReplay}
+            onEnginePauseReplay={handleEnginePauseReplay}
+            onEngineResumeReplay={handleEngineResumeReplay}
           />
         )}
 

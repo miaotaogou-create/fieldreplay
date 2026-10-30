@@ -50,10 +50,15 @@ pub fn recording_status_json(active: &ActiveRecording) -> String {
 
 pub fn replaying_status_json(active: &ActiveReplay) -> String {
     format!(
-        "{{\"sent\":{},\"type\":\"{}\",\"durationUs\":{}}}",
+        "{{\"sent\":{},\"type\":\"{}\",\"durationUs\":{},\"paused\":{}}}",
         active.sent_count.load(Ordering::SeqCst),
         escape_str(&active.channel_type),
-        active.duration_us
+        active.duration_us,
+        if active.paused.load(Ordering::SeqCst) {
+            "true"
+        } else {
+            "false"
+        }
     )
 }
 

@@ -17,6 +17,8 @@ pub struct ActiveRecording {
 
 pub struct ActiveReplay {
     pub stop: Arc<AtomicBool>,
+    /// 为真时冻结重放时间轴（不发下一帧），墙钟暂停时长从相对调度中扣除。
+    pub paused: Arc<AtomicBool>,
     /// 线程自然结束或 stop 后置 true，供 status/下一次 start 回收槽位。
     pub finished: Arc<AtomicBool>,
     pub channel_type: String,
