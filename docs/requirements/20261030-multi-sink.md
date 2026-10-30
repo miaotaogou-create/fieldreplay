@@ -47,6 +47,15 @@ E12a 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 
 E12b 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 
+## E12c 验收
+
+- [x] `multi_replay` 支持同会话 MQTT 目标（可与 UDP/视频 UDP/TCP/串口并存），按相对时间轴 PUBLISH（topic 取帧 `aux`，可选 `topic_prefix`；QoS/retain 取帧 flags）
+- [x] 控制面：`targets[]` 允许 `mqtt`；可选 username/password / TLS 字段；打开失败 → 整次 `replay.start` 失败
+- [x] `self-check`：UDP+MQTT 对齐重放，载荷与 topic 抽查正确（`self_check_multi_udp_mqtt_replay`，MiniBroker）
+- [x] 既有多路与单路 MQTT 行为不回归
+
+E12c 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。非目标：mTLS 客户端证书。
+
 ## 非目标（本增强整轮）
 
 - 多路 RTSP 服务端
@@ -55,4 +64,4 @@ E12b 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 
 ## 建议下一手
 
-E12c MQTT → E12d UI。
+E12d UI（放开 capable；串口/TCP/MQTT 目标表单项）。

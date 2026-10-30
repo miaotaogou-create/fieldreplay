@@ -16,8 +16,8 @@ use fieldreplay_engine::{
     record_video_to_file, record_video_to_file_with, replay_mqtt_from_file,
     replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
     replay_video_rtsp_from_file, run_io_acceptance,     self_check_multi_udp,
-    self_check_multi_udp_replay, self_check_multi_udp_serial_replay,
-    self_check_multi_udp_tcp_replay, self_check_pcap_export,
+    self_check_multi_udp_mqtt_replay, self_check_multi_udp_replay,
+    self_check_multi_udp_serial_replay, self_check_multi_udp_tcp_replay, self_check_pcap_export,
     serial_pair_from_env, serve_control, write_session_pcap, MiniBroker, MiniRtspServer,
     MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
     RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort,
@@ -795,6 +795,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: 多路 UDP+串口对齐重放… ");
     let _ = io::stdout().flush();
     self_check_multi_udp_serial_replay()?;
+    println!("ok");
+
+    print!("self-check: 多路 UDP+MQTT 对齐重放… ");
+    let _ = io::stdout().flush();
+    self_check_multi_udp_mqtt_replay()?;
     println!("ok");
 
     print!("self-check: 视频(RTP/UDP) 录放环回… ");

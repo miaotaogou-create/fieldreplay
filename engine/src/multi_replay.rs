@@ -1,6 +1,6 @@
 //! 多通道对齐重放（E11c / E12）：单一相对时间轴，按 `channel_index` 扇出到各目标。
 //!
-//! ponytail: E12a/b sink 含 UDP/视频(UDP)、TCP、串口；MQTT/RTSP 多路见 E12c。
+//! ponytail: E12a–c sink 含 UDP/视频(UDP)、TCP、串口、MQTT；多路 RTSP listen 仍不支持。
 //! 天花板是混合类型需各 sink 进同一调度器；升级路径继续往 `MultiReplayTarget` 加变体。
 
 use std::io;
@@ -11,6 +11,9 @@ use std::time::{Duration, Instant};
 
 use crate::clock::{SessionClock, WaitResult};
 use crate::fcap::{ChannelType, PacketKind, SessionReader};
+use crate::mqtt::{
+    apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, MqttClient, MqttConfig,
+};
 use crate::replay::{
     emit_with_fault, take_pending_seek, try_restart_loop, FaultInjection, FaultRng,
     OnReplayProgress,
@@ -43,11 +46,21 @@ pub struct SerialMultiTarget {
     pub port: SerialPort,
 }
 
-/// 多路重放目标（E12a/b：UDP + TCP + 串口）。
+/// 一路 MQTT 多路目标（启动时已 CONNECT；按帧 aux 作 topic 发布）。
+pub struct MqttMultiTarget {
+    pub channel_index: u16,
+    pub broker_label: String,
+    pub client: MqttClient,
+    pub topic_prefix: String,
+    pub qos_override: Option<u8>,
+}
+
+/// 多路重放目标（E12a–c：UDP + TCP + 串口 + MQTT）。
 pub enum MultiReplayTarget {
     Udp(DatagramTarget),
     Tcp(TcpMultiTarget),
     Serial(SerialMultiTarget),
+    Mqtt(MqttMultiTarget),
 }
 
 impl MultiReplayTarget {
@@ -56,6 +69,7 @@ impl MultiReplayTarget {
             Self::Udp(t) => t.channel_index,
             Self::Tcp(t) => t.channel_index,
             Self::Serial(t) => t.channel_index,
+            Self::Mqtt(t) => t.channel_index,
         }
     }
 
@@ -64,6 +78,7 @@ impl MultiReplayTarget {
             Self::Udp(t) => t.expect,
             Self::Tcp(_) => ChannelType::Tcp,
             Self::Serial(_) => ChannelType::Serial,
+            Self::Mqtt(_) => ChannelType::Mqtt,
         }
     }
 
@@ -77,6 +92,7 @@ impl MultiReplayTarget {
                 t.endpoint
             ),
             Self::Serial(t) => format!("{}→serial:{}", t.channel_index, t.port_name),
+            Self::Mqtt(t) => format!("{}→mqtt:{}", t.channel_index, t.broker_label),
         }
     }
 
@@ -229,10 +245,12 @@ pub fn replay_multi_from_file_with(
             continue;
         };
 
-        // UDP/视频/串口：只关心 Data；TCP：连接事件也计入本趟匹配
+        // UDP/视频/串口/MQTT：只关心 Data；TCP：连接事件也计入本趟匹配
         let data_only = matches!(
             targets[ti],
-            MultiReplayTarget::Udp(_) | MultiReplayTarget::Serial(_)
+            MultiReplayTarget::Udp(_)
+                | MultiReplayTarget::Serial(_)
+                | MultiReplayTarget::Mqtt(_)
         );
         if data_only && pkt.kind != PacketKind::Data {
             continue;
@@ -302,6 +320,23 @@ pub fn replay_multi_from_file_with(
                     &mut sent,
                     on_progress,
                     |bytes| tgt.port.write_all(bytes),
+                )?;
+            }
+            MultiReplayTarget::Mqtt(tgt) => {
+                let topic = String::from_utf8_lossy(&pkt.aux);
+                let topic = apply_topic_prefix(&tgt.topic_prefix, &topic);
+                let qos = tgt
+                    .qos_override
+                    .unwrap_or_else(|| mqtt_qos_from_flags(pkt.flags));
+                let retain = mqtt_retain_from_flags(pkt.flags);
+                emit_with_fault(
+                    &pkt.payload,
+                    &fault,
+                    &mut rng,
+                    pkt.relative_us,
+                    &mut sent,
+                    on_progress,
+                    |bytes| tgt.client.publish(&topic, bytes, qos, retain),
                 )?;
             }
             MultiReplayTarget::Tcp(tgt) => match pkt.kind {
@@ -461,6 +496,24 @@ pub fn serial_multi_target_with_port(
         port_name: port_name.into(),
         port,
     }
+}
+
+/// 连接 Broker，构造 MQTT 多路目标；失败则整次失败。
+pub fn open_mqtt_multi_target(
+    channel_index: u16,
+    config: &MqttConfig,
+    topic_prefix: impl Into<String>,
+    qos_override: Option<u8>,
+    poll_timeout: Duration,
+) -> io::Result<MqttMultiTarget> {
+    let client = MqttClient::connect(config, poll_timeout)?;
+    Ok(MqttMultiTarget {
+        channel_index,
+        broker_label: format!("{}:{}", config.broker, config.port),
+        client,
+        topic_prefix: topic_prefix.into(),
+        qos_override,
+    })
 }
 
 /// 最小自检：两路 UDP 同会话录制后对齐重放，载荷与通道绑定正确。
@@ -1029,5 +1082,170 @@ pub fn self_check_multi_udp_serial_replay() -> io::Result<()> {
     }
 
     eprintln!("  多路 UDP+串口对齐重放自检：通过（sent={sent}）");
+    Ok(())
+}
+
+/// E12c：同会话 UDP + MQTT 对齐重放（MiniBroker 旁路订阅核验）。
+pub fn self_check_multi_udp_mqtt_replay() -> io::Result<()> {
+    use std::net::UdpSocket;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Instant;
+
+    use crate::fcap::{ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionWriter};
+    use crate::mqtt::{pack_mqtt_flags, MiniBroker, MqttClient, MqttConfig};
+
+    let broker = MiniBroker::start()?;
+    let addr = broker.addr();
+    thread::sleep(Duration::from_millis(40));
+
+    // ponytail: 合成多通道会话，与 E12b 同套路；升级可接多路录制 MQTT job。
+    let out = std::env::temp_dir().join(format!(
+        "fieldreplay_multi_udp_mqtt_{}.fcap",
+        std::process::id()
+    ));
+    {
+        let channels = [
+            ChannelEntry {
+                channel_index: 0,
+                channel_type: ChannelType::Udp,
+                name: "u0".into(),
+                config_json: r#"{"bind_ip":"127.0.0.1","bind_port":0,"peer_ip":"","peer_port":0}"#
+                    .into(),
+            },
+            ChannelEntry {
+                channel_index: 1,
+                channel_type: ChannelType::Mqtt,
+                name: "m1".into(),
+                config_json: MqttConfig::new(addr.ip().to_string(), addr.port(), "plant/#", 0)
+                    .to_config_json(),
+            },
+        ];
+        let mut w = SessionWriter::create(&out, 1_700_000_000_000_000, &channels, None)?;
+        for (us, ch, topic, payload) in [
+            (10_000u64, 0u16, "", &b"U1"[..]),
+            (20_000, 1, "plant/line/a", &b"M1"[..]),
+            (30_000, 0, "", &b"U2"[..]),
+            (40_000, 1, "plant/line/b", &b"M2"[..]),
+        ] {
+            w.append_packet(&PacketRecord {
+                relative_us: us,
+                channel_index: ch,
+                kind: PacketKind::Data,
+                direction: 0,
+                flags: pack_mqtt_flags(0, false),
+                aux: topic.as_bytes().to_vec(),
+                payload: payload.to_vec(),
+            })?;
+        }
+        w.finalize()?;
+    }
+
+    let udp_rx = UdpSocket::bind("127.0.0.1:0")?;
+    udp_rx.set_read_timeout(Some(Duration::from_millis(800)))?;
+    let udp_rx_addr = udp_rx.local_addr()?;
+
+    let listen_cfg = MqttConfig::new(addr.ip().to_string(), addr.port(), "unused", 0);
+    let mut listener = MqttClient::connect(&listen_cfg, Duration::from_millis(100))?;
+    listener.subscribe("plant/#", 0)?;
+    thread::sleep(Duration::from_millis(80));
+
+    let mqtt_got = Arc::new(std::sync::Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let mqtt_got_c = Arc::clone(&mqtt_got);
+    let listen_stop = Arc::new(AtomicBool::new(false));
+    let listen_stop_c = Arc::clone(&listen_stop);
+    let collector = thread::spawn(move || -> io::Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        let mut out = Vec::new();
+        while out.len() < 2 && Instant::now() < deadline {
+            if let Some(msg) = listener.poll_publish(&listen_stop_c)? {
+                out.push((msg.topic, msg.payload));
+            }
+        }
+        let _ = listener.disconnect();
+        *mqtt_got_c.lock().unwrap() = out;
+        Ok(())
+    });
+
+    let play_cfg = MqttConfig::new(addr.ip().to_string(), addr.port(), "unused", 0);
+    let mut targets = vec![
+        MultiReplayTarget::Udp(open_datagram_target(
+            0,
+            ChannelType::Udp,
+            udp_rx_addr,
+            "0.0.0.0:0".parse().unwrap(),
+        )?),
+        MultiReplayTarget::Mqtt(open_mqtt_multi_target(
+            1,
+            &play_cfg,
+            "",
+            Some(0),
+            Duration::from_millis(100),
+        )?),
+    ];
+
+    let stop_r = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
+    let seek = AtomicU64::new(SessionClock::NO_SEEK);
+    let mut on: OnReplayProgress<'_> = None;
+    let sent = replay_multi_from_file_with(
+        &MultiReplayOptions {
+            in_path: out.clone(),
+            speed: 10.0,
+            fault: FaultInjection::OFF,
+            looping: false,
+        },
+        &mut targets,
+        &stop_r,
+        &paused,
+        &seek,
+        0,
+        &mut on,
+    );
+    let sent = sent?;
+    // 迷你 Broker 约 2ms 一轮；等扇出完成再停旁路订阅，避免漏收末帧
+    thread::sleep(Duration::from_millis(200));
+    listen_stop.store(true, Ordering::SeqCst);
+    collector
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "MQTT 接收线程 panic"))??;
+    broker.stop();
+    let _ = std::fs::remove_file(&out);
+
+    if sent < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP+MQTT 重放发送帧数不足: {sent}"),
+        ));
+    }
+
+    let mut got_u = Vec::new();
+    let mut buf = [0u8; 64];
+    for _ in 0..8 {
+        if let Ok((n, _)) = udp_rx.recv_from(&mut buf) {
+            got_u.push(buf[..n].to_vec());
+        }
+    }
+    if got_u.len() < 2 || got_u[0] != b"U1" || got_u[1] != b"U2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP 通道载荷不符: {:?}", got_u),
+        ));
+    }
+    let got_m = mqtt_got.lock().unwrap().clone();
+    if got_m.len() < 2 || got_m[0].1 != b"M1" || got_m[1].1 != b"M2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT 通道载荷不符: {:?}", got_m),
+        ));
+    }
+    if got_m[0].0 != "plant/line/a" || got_m[1].0 != "plant/line/b" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("MQTT topic 不符: {:?}", got_m),
+        ));
+    }
+
+    eprintln!("  多路 UDP+MQTT 对齐重放自检：通过（sent={sent}）");
     Ok(())
 }

@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::fcap::ChannelType;
 use crate::mqtt::MqttConfig;
 use crate::multi_replay::{
-    open_datagram_target, open_serial_multi_target, open_tcp_multi_target,
+    open_datagram_target, open_mqtt_multi_target, open_serial_multi_target, open_tcp_multi_target,
     replay_multi_from_file_with, MultiReplayOptions, MultiReplayTarget,
 };
 use crate::replay::{
@@ -202,6 +202,11 @@ enum BoundMulti {
         ch: u16,
         config: SerialConfig,
     },
+    Mqtt {
+        ch: u16,
+        config: MqttConfig,
+        topic_prefix: String,
+    },
 }
 
 fn start_multi_replay(
@@ -243,14 +248,7 @@ fn start_multi_replay(
             "video" | "video_stream" => ChannelType::Video,
             "tcp" => ChannelType::Tcp,
             "serial" => ChannelType::Serial,
-            "mqtt" => {
-                return err_result(
-                    id,
-                    &format!(
-                        "targets[{i}] 多路对齐重放暂不支持 mqtt（E12b 已支持 serial；MQTT 见 E12c）"
-                    ),
-                );
-            }
+            "mqtt" => ChannelType::Mqtt,
             other => {
                 return err_result(id, &format!("targets[{i}] 不支持的类型: {other}"));
             }
@@ -326,8 +324,17 @@ fn start_multi_replay(
                 };
                 bound.push(BoundMulti::Serial { ch, config: cfg });
             }
-            _ => {
-                return err_result(id, &format!("targets[{i}] 内部错误：未处理类型"));
+            ChannelType::Mqtt => {
+                let (cfg, topic_prefix) = match resolve_mqtt_multi_target(&config_raw, &entry.config_json)
+                {
+                    Ok(v) => v,
+                    Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
+                };
+                bound.push(BoundMulti::Mqtt {
+                    ch,
+                    config: cfg,
+                    topic_prefix,
+                });
             }
         }
     }
@@ -401,6 +408,22 @@ fn start_multi_replay(
                     }
                 }
             }
+            BoundMulti::Mqtt {
+                ch,
+                config,
+                topic_prefix,
+            } => match open_mqtt_multi_target(
+                *ch,
+                config,
+                topic_prefix.clone(),
+                None,
+                Duration::from_millis(200),
+            ) {
+                Ok(t) => sinks.push(MultiReplayTarget::Mqtt(t)),
+                Err(e) => {
+                    return err_result(id, &format!("打开目标通道 {ch} 失败: {e}"));
+                }
+            },
         }
     }
 
@@ -874,4 +897,41 @@ fn parse_mqtt_broker(config: &str) -> io::Result<SocketAddr> {
     format!("{host}:{port}")
         .parse()
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("MQTT broker 无效: {e}")))
+}
+
+/// 多路 MQTT：目标 config 覆盖 broker/凭据/TLS；topic 回退会话通道（仅 CONNECT 占位，发布用帧 aux）。
+fn resolve_mqtt_multi_target(
+    target_config: &str,
+    recorded_config_json: &str,
+) -> io::Result<(MqttConfig, String)> {
+    let recorded = MqttConfig::from_config_json(recorded_config_json).unwrap_or_else(|_| {
+        MqttConfig::new("127.0.0.1", 1883, "#", 0)
+    });
+    let broker = parse_mqtt_broker(target_config)?;
+    let topic_prefix = extract_str(target_config, "topic_prefix")
+        .or_else(|| extract_str(target_config, "topicPrefix"))
+        .unwrap_or_default();
+    let username = extract_str(target_config, "username")
+        .filter(|s| !s.is_empty())
+        .or_else(|| recorded.username.clone());
+    let password = extract_str(target_config, "password")
+        .filter(|s| !s.is_empty())
+        .or_else(|| recorded.password.clone());
+    let tls = extract_bool(target_config, "tls").unwrap_or(recorded.tls);
+    let ca_cert_path = extract_str(target_config, "ca_cert_path")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| recorded.ca_cert_path.clone());
+    let tls_server_name = extract_str(target_config, "tls_server_name")
+        .filter(|s| !s.is_empty())
+        .or_else(|| recorded.tls_server_name.clone());
+    let config = MqttConfig::new(
+        broker.ip().to_string(),
+        broker.port(),
+        recorded.topic.clone(),
+        recorded.qos,
+    )
+    .with_credentials(username, password)
+    .with_tls(tls, ca_cert_path, tls_server_name);
+    Ok((config, topic_prefix))
 }
