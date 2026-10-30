@@ -15,12 +15,12 @@ use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     record_video_to_file, record_video_to_file_with, replay_mqtt_from_file,
     replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
-    replay_video_rtsp_from_file, run_io_acceptance, self_check_pcap_export, serial_pair_from_env,
-    serve_control, write_session_pcap, MiniBroker, MiniRtspServer, MqttClient, MqttConfig,
-    MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection, RecordOptions, ReplayOptions,
-    RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort, SerialRecordOptions,
-    SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND,
-    SERIAL_PAIR_ENV,
+    replay_video_rtsp_from_file, run_io_acceptance, self_check_multi_udp, self_check_pcap_export,
+    serial_pair_from_env, serve_control, write_session_pcap, MiniBroker, MiniRtspServer,
+    MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
+    RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort,
+    SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions,
+    TcpRole, DEFAULT_BIND, SERIAL_PAIR_ENV,
 };
 
 fn main() {
@@ -773,6 +773,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: UDP 录放环回… ");
     let _ = io::stdout().flush();
     udp_loopback_check()?;
+    println!("ok");
+
+    print!("self-check: 多路 UDP 并发录制… ");
+    let _ = io::stdout().flush();
+    self_check_multi_udp()?;
     println!("ok");
 
     print!("self-check: 视频(RTP/UDP) 录放环回… ");

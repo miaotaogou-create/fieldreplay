@@ -126,6 +126,112 @@ pub fn extract_object(json: &str, key: &str) -> Option<String> {
     None
 }
 
+/// 抽取 JSON 数组的原始子串（含首尾方括号）。
+pub fn extract_array(json: &str, key: &str) -> Option<String> {
+    let after = after_key(json, key)?;
+    if !after.starts_with('[') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, c) in after.char_indices() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_str = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(after[..=i].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 将 JSON 数组拆成顶层元素原始子串（对象/数组/字面量）。
+pub fn split_json_array_elements(array_json: &str) -> Vec<String> {
+    let s = array_json.trim();
+    if !s.starts_with('[') || !s.ends_with(']') {
+        return Vec::new();
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut out = Vec::new();
+    let mut start = None;
+    let mut depth_obj = 0i32;
+    let mut depth_arr = 0i32;
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, c) in inner.char_indices() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                in_str = true;
+            }
+            '{' => {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                depth_obj += 1;
+            }
+            '}' => depth_obj -= 1,
+            '[' => {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                depth_arr += 1;
+            }
+            ']' => depth_arr -= 1,
+            ',' if depth_obj == 0 && depth_arr == 0 => {
+                if let Some(st) = start {
+                    let elem = inner[st..i].trim();
+                    if !elem.is_empty() {
+                        out.push(elem.to_string());
+                    }
+                }
+                start = None;
+            }
+            c if !c.is_whitespace() => {
+                if start.is_none() {
+                    start = Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(st) = start {
+        let elem = inner[st..].trim();
+        if !elem.is_empty() {
+            out.push(elem.to_string());
+        }
+    }
+    out
+}
+
 pub fn ok_result(id: &str, result_json: &str) -> String {
     format!(
         "{{\"id\":\"{}\",\"ok\":true,\"result\":{}}}",

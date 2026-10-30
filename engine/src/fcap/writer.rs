@@ -84,7 +84,10 @@ impl SessionWriter {
     }
 
     /// 回写计数并置 FINALIZED。
-    pub fn finalize(mut self) -> io::Result<()> {
+    pub fn finalize(&mut self) -> io::Result<()> {
+        if self.finalized {
+            return Ok(());
+        }
         self.file.flush()?;
         self.header.packet_count = self.packet_count;
         self.header.total_payload_bytes = self.total_payload_bytes;

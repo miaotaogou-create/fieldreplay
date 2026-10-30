@@ -10,6 +10,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::fcap::{ChannelType, PacketRecord, SessionReader};
 use crate::mqtt::MqttConfig;
+use crate::multi_record::{
+    record_multi_to_file, ChannelJob, MultiRecordOptions, PacketHook,
+};
 use crate::record::{
     record_mqtt_to_file_with, record_serial_to_file_with, record_tcp_to_file_with,
     record_udp_to_file_with, record_video_to_file_with, MqttRecordOptions, OnPacket, RecordOptions,
@@ -21,7 +24,8 @@ use crate::tcp::{TcpConfig, TcpRole};
 use super::dto::packet_event_json;
 use super::hub::PushHub;
 use super::json_util::{
-    err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
+    err_result, escape_str, extract_array, extract_object, extract_str, extract_u64, ok_result,
+    split_json_array_elements,
 };
 use super::state::{ActiveRecording, LoadedSession};
 
@@ -35,19 +39,27 @@ pub fn handle_record_start(
         return err_result(id, "已在录制中，请先 record.stop");
     }
 
-    let ty = match extract_str(msg, "type") {
-        Some(t) => t.to_ascii_lowercase(),
-        None => return err_result(id, "record.start 需要 type"),
-    };
-    let name = extract_str(msg, "name").unwrap_or_else(|| ty.clone());
     let session_title = extract_str(msg, "sessionTitle");
     let out = extract_str(msg, "out").unwrap_or_else(default_out_path);
-    let config_raw = extract_object(msg, "config").unwrap_or_else(|| "{}".into());
-
     let out_path = PathBuf::from(&out);
     if let Some(parent) = out_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+
+    // E11a：非空 channels[] 优先；否则走旧单路 type+config
+    if let Some(arr) = extract_array(msg, "channels") {
+        let elems = split_json_array_elements(&arr);
+        if !elems.is_empty() {
+            return start_multi_record(id, &elems, session_title, out_path, state_recording, hub);
+        }
+    }
+
+    let ty = match extract_str(msg, "type") {
+        Some(t) => t.to_ascii_lowercase(),
+        None => return err_result(id, "record.start 需要 type 或非空 channels"),
+    };
+    let name = extract_str(msg, "name").unwrap_or_else(|| ty.clone());
+    let config_raw = extract_object(msg, "config").unwrap_or_else(|| "{}".into());
 
     let stop = Arc::new(AtomicBool::new(false));
     let packet_count = Arc::new(AtomicU64::new(0));
@@ -71,7 +83,6 @@ pub fn handle_record_start(
             &count_c,
             &hub_c,
         );
-        // 打开失败等会立刻推到 UI，不必等 record.stop
         if let Err(ref e) = result {
             hub_c.broadcast(&format!(
                 "{{\"event\":\"record.error\",\"error\":\"{}\"}}",
@@ -107,6 +118,148 @@ pub fn handle_record_start(
             escape_str(&out_path.to_string_lossy())
         ),
     )
+}
+
+fn start_multi_record(
+    id: &str,
+    elems: &[String],
+    session_title: Option<String>,
+    out_path: PathBuf,
+    state_recording: &mut Option<ActiveRecording>,
+    hub: &Arc<PushHub>,
+) -> String {
+    let mut jobs = Vec::with_capacity(elems.len());
+    let mut channels_json = String::from("[");
+    for (i, elem) in elems.iter().enumerate() {
+        let job = match parse_channel_job(elem, i) {
+            Ok(j) => j,
+            Err(e) => return err_result(id, &e.to_string()),
+        };
+        if i > 0 {
+            channels_json.push(',');
+        }
+        channels_json.push_str(&format!(
+            "{{\"index\":{i},\"type\":\"{}\",\"name\":\"{}\"}}",
+            escape_str(&channel_job_type_str(&job)),
+            escape_str(job.name())
+        ));
+        jobs.push(job);
+    }
+    channels_json.push(']');
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let packet_count = Arc::new(AtomicU64::new(0));
+    let hub_c = Arc::clone(hub);
+    let stop_c = Arc::clone(&stop);
+    let count_c = Arc::clone(&packet_count);
+    let out_c = out_path.clone();
+    let title_c = session_title;
+
+    // 预览：按帧类型推断推送 type 字符串
+    let type_by_ch: Vec<String> = jobs.iter().map(channel_job_type_str).collect();
+
+    let join = thread::spawn(move || {
+        let hub_hook = Arc::clone(&hub_c);
+        let count_hook = Arc::clone(&count_c);
+        let types = type_by_ch;
+        let hook: PacketHook = Arc::new(move |pkt: &PacketRecord| {
+            let i = count_hook.fetch_add(1, Ordering::SeqCst);
+            let ty = types
+                .get(pkt.channel_index as usize)
+                .map(|s| s.as_str())
+                .unwrap_or("udp");
+            let ch_ty = parse_channel_type(ty).unwrap_or(ChannelType::Udp);
+            hub_hook.broadcast(&packet_event_json(i, pkt, ch_ty));
+        });
+        let result = record_multi_to_file(
+            &MultiRecordOptions {
+                out_path: out_c,
+                session_title: title_c,
+                max_duration: None,
+                poll_timeout: Duration::from_millis(200),
+            },
+            &jobs,
+            &stop_c,
+            Some(hook),
+        );
+        if let Err(ref e) = result {
+            hub_c.broadcast(&format!(
+                "{{\"event\":\"record.error\",\"error\":\"{}\"}}",
+                escape_str(&e.to_string())
+            ));
+        }
+        result
+    });
+
+    *state_recording = Some(ActiveRecording {
+        stop,
+        out_path: out_path.clone(),
+        channel_type: "multi".into(),
+        packet_count,
+        join: Some(join),
+    });
+
+    ok_result(
+        id,
+        &format!(
+            "{{\"started\":true,\"out\":\"{}\",\"channels\":{channels_json}}}",
+            escape_str(&out_path.to_string_lossy())
+        ),
+    )
+}
+
+fn channel_job_type_str(job: &ChannelJob) -> String {
+    match job {
+        ChannelJob::Udp { .. } => "udp".into(),
+        ChannelJob::Video { .. } => "video".into(),
+        ChannelJob::Serial { .. } => "serial".into(),
+        ChannelJob::Tcp { .. } => "tcp".into(),
+        ChannelJob::Mqtt { .. } => "mqtt".into(),
+    }
+}
+
+fn parse_channel_job(elem: &str, index: usize) -> io::Result<ChannelJob> {
+    let ty = extract_str(elem, "type")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("channels[{index}] 缺 type")))?
+        .to_ascii_lowercase();
+    let name = extract_str(elem, "name").unwrap_or_else(|| format!("{ty}-{index}"));
+    let config = extract_object(elem, "config").unwrap_or_else(|| "{}".into());
+    match ty.as_str() {
+        "udp" => Ok(ChannelJob::Udp {
+            name,
+            bind: parse_udp_bind(&config)?,
+        }),
+        "video" | "video_stream" => {
+            let rtsp = extract_str(&config, "rtsp_url").or_else(|| extract_str(&config, "streamUrl"));
+            let has_rtsp = rtsp.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            let bind = if has_rtsp {
+                parse_udp_bind(&config).unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap())
+            } else {
+                parse_udp_bind(&config)?
+            };
+            Ok(ChannelJob::Video {
+                name,
+                bind,
+                rtsp_url: rtsp,
+            })
+        }
+        "serial" => Ok(ChannelJob::Serial {
+            name,
+            config: parse_serial(&config)?,
+        }),
+        "tcp" => {
+            let cfg = TcpConfig::from_config_json(&config).or_else(|_| parse_tcp_loose(&config))?;
+            Ok(ChannelJob::Tcp { name, config: cfg })
+        }
+        "mqtt" => Ok(ChannelJob::Mqtt {
+            name,
+            config: MqttConfig::from_config_json(&config)?,
+        }),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("channels[{index}] 不支持的类型: {other}"),
+        )),
+    }
 }
 
 pub fn handle_record_stop(

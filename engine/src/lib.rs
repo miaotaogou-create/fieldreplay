@@ -5,6 +5,7 @@ pub mod control;
 pub mod fcap;
 pub mod io_accept;
 pub mod mqtt;
+pub mod multi_record;
 pub mod pcap;
 pub mod record;
 pub mod replay;
@@ -23,6 +24,9 @@ pub use fcap::{
 pub use mqtt::{
     apply_topic_prefix, mqtt_qos_from_flags, mqtt_retain_from_flags, pack_mqtt_flags,
     write_test_ca_file, MiniBroker, MqttClient, MqttConfig, FLAG_MQTT_QOS_MASK, FLAG_MQTT_RETAIN,
+};
+pub use multi_record::{
+    record_multi_to_file, self_check_multi_udp, ChannelJob, MultiRecordOptions, PacketHook,
 };
 pub use pcap::{
     self_check_pcap_export, session_to_pcap_bytes, write_session_pcap, PcapExportStats,
