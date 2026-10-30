@@ -67,6 +67,18 @@ pub fn extract_u64(json: &str, key: &str) -> Option<u64> {
     after[..end].parse().ok()
 }
 
+/// 抽取 JSON 浮点/整数字段（如倍速 `speed`）。
+pub fn extract_f64(json: &str, key: &str) -> Option<f64> {
+    let after = after_key(json, key)?;
+    let end = after
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E'))
+        .unwrap_or(after.len());
+    if end == 0 {
+        return None;
+    }
+    after[..end].parse().ok()
+}
+
 /// 抽取嵌套对象的原始子串（含首尾大括号）。
 pub fn extract_object(json: &str, key: &str) -> Option<String> {
     let after = after_key(json, key)?;

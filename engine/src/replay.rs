@@ -23,6 +23,8 @@ pub struct ReplayOptions {
     pub target: SocketAddr,
     /// 发送端本地 bind（默认 `0.0.0.0:0`）
     pub local_bind: SocketAddr,
+    /// 墙钟倍速；1.0=实时。非法值按 1.0。
+    pub speed: f64,
 }
 
 pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
@@ -56,10 +58,12 @@ pub fn replay_udp_from_file_with(
     let base = Instant::now();
     let mut sent = 0u64;
 
+    let speed = SessionClock::clamp_speed(opts.speed);
     eprintln!(
-        "重放中：{} → {}（按 relative_us）",
+        "重放中：{} → {}（按 relative_us，{}x）",
         opts.in_path.display(),
-        opts.target
+        opts.target,
+        speed
     );
 
     reader.rewind_packets()?;
@@ -77,7 +81,7 @@ pub fn replay_udp_from_file_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Udp) {
             continue;
         }
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
             break;
         }
         send_to(&sock, &pkt.payload, opts.target)?;
@@ -99,6 +103,7 @@ pub fn replay_udp_path(
         in_path: path.as_ref().to_path_buf(),
         target,
         local_bind: "0.0.0.0:0".parse().unwrap(),
+        speed: 1.0,
     };
     replay_udp_from_file(&opts)
 }
@@ -106,6 +111,8 @@ pub fn replay_udp_path(
 pub struct SerialReplayOptions {
     pub in_path: std::path::PathBuf,
     pub config: SerialConfig,
+    /// 墙钟倍速；1.0=实时。
+    pub speed: f64,
 }
 
 pub fn replay_serial_from_file(opts: &SerialReplayOptions) -> io::Result<u64> {
@@ -151,11 +158,13 @@ pub fn replay_serial_with_port_with(
 
     let base = Instant::now();
     let mut sent = 0u64;
+    let speed = SessionClock::clamp_speed(opts.speed);
 
     eprintln!(
-        "重放中：{} → 串口 {}（按 relative_us）",
+        "重放中：{} → 串口 {}（按 relative_us，{}x）",
         opts.in_path.display(),
-        opts.config.port_name
+        opts.config.port_name,
+        speed
     );
 
     reader.rewind_packets()?;
@@ -173,7 +182,7 @@ pub fn replay_serial_with_port_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Serial) {
             continue;
         }
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
             break;
         }
         port.write_all(&pkt.payload)?;
@@ -192,6 +201,8 @@ pub struct TcpReplayOptions {
     /// 重放侧地址：角色取反后，server→bind，client→connect。
     pub endpoint: SocketAddr,
     pub poll_timeout: Duration,
+    /// 墙钟倍速；1.0=实时。
+    pub speed: f64,
 }
 
 /// 按会话内录制角色取反后建立连接，并把录到的 RX 数据按时间轴写回对端。
@@ -223,12 +234,14 @@ pub fn replay_tcp_from_file_with(
     let recorded_cfg = TcpConfig::from_config_json(&recorded.config_json)?;
     let play_role = recorded_cfg.role.invert();
 
+    let speed = SessionClock::clamp_speed(opts.speed);
     eprintln!(
-        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us）",
+        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us，{}x）",
         opts.in_path.display(),
         play_role.as_str(),
         opts.endpoint,
-        recorded_cfg.role.as_str()
+        recorded_cfg.role.as_str(),
+        speed
     );
 
     let base = Instant::now();
@@ -248,7 +261,7 @@ pub fn replay_tcp_from_file_with(
             continue;
         }
 
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
             break;
         }
 
@@ -312,6 +325,8 @@ pub struct MqttReplayOptions {
     /// 发布 QoS：`None` = 用帧 flags 里录到的值。
     pub qos_override: Option<u8>,
     pub poll_timeout: Duration,
+    /// 墙钟倍速；1.0=实时。
+    pub speed: f64,
 }
 
 /// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
@@ -347,12 +362,14 @@ pub fn replay_mqtt_from_file_with(
         recorded_cfg.qos,
     );
 
+    let speed = SessionClock::clamp_speed(opts.speed);
     eprintln!(
-        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us）",
+        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us，{}x）",
         opts.in_path.display(),
         config.broker,
         config.port,
-        opts.topic_prefix
+        opts.topic_prefix,
+        speed
     );
 
     let mut client = MqttClient::connect(&config, opts.poll_timeout)?;
@@ -381,7 +398,7 @@ pub fn replay_mqtt_from_file_with(
             .unwrap_or_else(|| mqtt_qos_from_flags(pkt.flags));
         let retain = mqtt_retain_from_flags(pkt.flags);
 
-        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, stop) {
+        if !SessionClock::sleep_until_relative_interruptible(base, pkt.relative_us, speed, stop) {
             break;
         }
         client.publish(&topic, &pkt.payload, qos, retain)?;

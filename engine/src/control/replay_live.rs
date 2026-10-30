@@ -17,8 +17,10 @@ use crate::replay::{
 use crate::serial::{Parity, SerialConfig, SerialPort};
 
 use super::hub::PushHub;
+use crate::clock::SessionClock;
+
 use super::json_util::{
-    err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
+    err_result, escape_str, extract_f64, extract_object, extract_str, extract_u64, ok_result,
 };
 use super::session_file::write_loaded_session;
 use super::state::{ActiveReplay, ControlState, LoadedSession};
@@ -51,6 +53,7 @@ pub fn handle_replay_start(
     let topic_prefix = extract_str(msg, "topicPrefix")
         .or_else(|| extract_str(msg, "topic_prefix"))
         .unwrap_or_default();
+    let speed = SessionClock::clamp_speed(extract_f64(msg, "speed").unwrap_or(1.0));
 
     let (in_path, duration_us) = {
         let session = state.session.as_ref().unwrap();
@@ -87,6 +90,7 @@ pub fn handle_replay_start(
             &path_c,
             &prefix_c,
             duration_us,
+            speed,
             &stop_c,
             &sent_c,
             &hub_c,
@@ -114,7 +118,7 @@ pub fn handle_replay_start(
     ok_result(
         id,
         &format!(
-            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us}}}",
+            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed}}}",
             escape_str(&ty),
             if config_raw.trim().is_empty() {
                 "{}"
@@ -182,6 +186,7 @@ fn run_replay(
     in_path: &Path,
     topic_prefix: &str,
     duration_us: u64,
+    speed: f64,
     stop: &AtomicBool,
     sent_count: &Arc<AtomicU64>,
     hub: &Arc<PushHub>,
@@ -204,6 +209,7 @@ fn run_replay(
                 in_path: in_path.to_path_buf(),
                 target,
                 local_bind: "0.0.0.0:0".parse().unwrap(),
+                speed,
             };
             replay_udp_from_file_with(&opts, stop, &mut on)
         }
@@ -212,6 +218,7 @@ fn run_replay(
             let opts = SerialReplayOptions {
                 in_path: in_path.to_path_buf(),
                 config: cfg,
+                speed,
             };
             let port = SerialPort::open(&opts.config, poll)?;
             replay_serial_with_port_with(&opts, &port, stop, &mut on)
@@ -222,6 +229,7 @@ fn run_replay(
                 in_path: in_path.to_path_buf(),
                 endpoint,
                 poll_timeout: poll,
+                speed,
             };
             replay_tcp_from_file_with(&opts, stop, &mut on)
         }
@@ -240,6 +248,7 @@ fn run_replay(
                 topic_prefix: prefix,
                 qos_override: None,
                 poll_timeout: poll,
+                speed,
             };
             replay_mqtt_from_file_with(&opts, stop, &mut on)
         }

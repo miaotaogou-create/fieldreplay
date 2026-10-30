@@ -75,10 +75,10 @@
 | `session.export` | 将内存会话写成二进制 `.fcap`，响应含 `b64` / `bytes` / `packetCount`；可选 `meta` 对象覆盖 SessionMeta；录制/重放中拒绝（E5d） |
 | `record.start` | 启真实通道录制：`type` + `config`（与 `.fcap` config_json 对齐）；可选 `out` / `name` / `sessionTitle`。同时刻一路。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`） |
 | `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
-| `replay.start` | 对已载入会话按时间轴重放：`type` + `config`（UDP `target_ip`/`target_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`，角色由文件取反；MQTT `broker`/`port` + 可选 `topicPrefix`）。同时刻一路，与录制互斥。推送 `replay.progress`（`sent`/`relativeUs`/`durationUs`）与结束时 `replay.done` |
+| `replay.start` | 对已载入会话按时间轴重放：`type` + `config`（UDP `target_ip`/`target_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`，角色由文件取反；MQTT `broker`/`port` + 可选 `topicPrefix`）；可选 `speed`（墙钟倍速，默认 1.0，范围约 0.05–100）。同时刻一路，与录制互斥。推送 `replay.progress`（`sent`/`relativeUs`/`durationUs`）与结束时 `replay.done` |
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位 |
 
-UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接时仍可下载 JSON 离线演示包。真实暂停 / 倍速 / seek / 故障注入仍后置。
+UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接时仍可下载 JSON 离线演示包。**倍速已接通**（`replay.start.speed`）。真实暂停 / seek / 故障注入仍后置。
 
 ## 会话文件
 

@@ -82,17 +82,19 @@ export interface ReplayConfig {
   // Serial specific configuration
   serial: {
     selectedPort: string; // 重演工具写入的端口 (如 COM2)
-    qtTargetPort: string; // 开发者上位机读取的配对端口 (如 COM1)
+    /** 上位机侧读取的配对口（如 COM1）；仅 UI 提示，引擎写 selectedPort */
+    hostComPort: string;
     baudRate: number;
     isPortOpen: boolean;
     availablePorts: string[];
   };
   // TCP Specific configuration
   tcp: {
-    mode: 'tool_is_server' | 'tool_is_client'; // tool_is_server: Qt上位机是客户端主动连过来; tool_is_client: Qt上位机是服务端重演工具主动连过去
+    // tool_is_server：上位机作 Client 连入；tool_is_client：工具主动连上位机监听口
+    mode: 'tool_is_server' | 'tool_is_client';
     serverPort: number; // 当重演工具是Server时监听的端口 (如 9000 或 502)
-    clientTargetHost: string; // 当重演工具是Client时连接的Qt上位机IP (如 127.0.0.1)
-    clientTargetPort: number; // 当重演工具是Client时连接的Qt上位机端口
+    clientTargetHost: string; // 工具作 Client 时连接的上位机 IP
+    clientTargetPort: number; // 工具作 Client 时连接的上位机端口
     connectedClientsCount: number;
   };
   // MQTT Specific configuration

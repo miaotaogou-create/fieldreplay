@@ -191,6 +191,8 @@ export class EngineClient {
     type: string;
     config: Record<string, unknown>;
     topicPrefix?: string;
+    /** 墙钟倍速；默认 1.0 */
+    speed?: number;
   }): Promise<EngineReplayStartResult> {
     return this.request<EngineReplayStartResult>('replay.start', args);
   }

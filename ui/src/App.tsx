@@ -192,6 +192,13 @@ export default function App() {
     };
     recordStartWallUsRef.current = Date.now() * 1000;
     setRecordedPackets([]);
+    // 新开录制时复位会话元数据，避免重演页仍显示上一包标题（G3）
+    setSessionMetadata({
+      ...emptySessionMetadata(),
+      sessionTitle: `现场录制-${channel.name}`,
+      recordedBy: '现场录制中',
+      startTime: new Date().toLocaleString(),
+    });
     await engine.startRecord({
       type: channel.type,
       name: channel.name,
@@ -227,12 +234,18 @@ export default function App() {
     }
     const mapped = replayConfigToEngine(tab, cfg);
     setEngineReplayTick(null);
+    const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
     await engine.startReplay({
       type: mapped.type,
       config: mapped.config,
       topicPrefix: mapped.topicPrefix,
+      speed,
     });
-    showToast(`已开始引擎重放：${mapped.type}`);
+    showToast(
+      speed === 1
+        ? `已开始引擎重放：${mapped.type}`
+        : `已开始引擎重放：${mapped.type}（${speed}x）`
+    );
   };
 
   const handleEngineStopReplay = async () => {

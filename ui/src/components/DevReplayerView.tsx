@@ -72,7 +72,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     virtualComPort: 'COM2',
     serial: {
       selectedPort: 'COM2',
-      qtTargetPort: 'COM1',
+      hostComPort: 'COM1',
       baudRate: 115200,
       isPortOpen: true,
       availablePorts: ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11', '/dev/ttyUSB0', '/dev/pts/2'],
@@ -556,16 +556,19 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           {/* Speed Presets */}
           <div className="flex items-center gap-1 p-0.5 bg-slate-800/80 rounded-md">
             <span className="text-[10px] text-slate-400 px-1.5">
-              {useEngineReplay ? '倍速(仅预览):' : '倍速:'}
+              倍速:
             </span>
             {[0.1, 0.5, 1.0, 2.0, 5.0, 10.0].map((s) => (
               <button
                 key={s}
                 type="button"
-                disabled={useEngineReplay}
-                title={useEngineReplay ? '引擎重放固定 1x' : undefined}
+                title={
+                  useEngineReplay
+                    ? '引擎重放按所选倍速调度墙钟间隔'
+                    : '离线演示按所选倍速推进'
+                }
                 onClick={() => handleSpeedChange(s)}
-                className={`px-2 py-0.5 text-[11px] font-mono font-medium rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`px-2 py-0.5 text-[11px] font-mono font-medium rounded transition-colors ${
                   replaySpeed === s
                     ? 'bg-sky-600 text-white shadow-xs'
                     : 'text-slate-400 hover:text-slate-200'
@@ -999,11 +1002,11 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   </span>
                   <input
                     type="text"
-                    value={replayConfig.serial.qtTargetPort}
+                    value={replayConfig.serial.hostComPort}
                     onChange={(e) =>
                       setReplayConfig({
                         ...replayConfig,
-                        serial: { ...replayConfig.serial, qtTargetPort: e.target.value },
+                        serial: { ...replayConfig.serial, hostComPort: e.target.value },
                       })
                     }
                     className="w-16 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-900 font-mono font-bold text-center"
@@ -1013,7 +1016,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                 <div className="px-2 py-1.5 bg-slate-900 text-slate-100 rounded-md flex items-center justify-between text-[11px] font-mono">
                   <span className="text-emerald-400 font-bold">{replayConfig.serial.selectedPort}</span>
                   <span className="text-sky-300 text-[10px]">══ com0com ══▶</span>
-                  <span className="text-sky-400 font-bold">{replayConfig.serial.qtTargetPort}</span>
+                  <span className="text-sky-400 font-bold">{replayConfig.serial.hostComPort}</span>
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -1033,13 +1036,13 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                           serial: {
                             ...replayConfig.serial,
                             selectedPort: preset.send,
-                            qtTargetPort: preset.recv,
+                            hostComPort: preset.recv,
                           },
                         })
                       }
                       className={`px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
                         replayConfig.serial.selectedPort === preset.send &&
-                        replayConfig.serial.qtTargetPort === preset.recv
+                        replayConfig.serial.hostComPort === preset.recv
                           ? 'bg-sky-50 text-sky-800 border-sky-300 font-bold'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
