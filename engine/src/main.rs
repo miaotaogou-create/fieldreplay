@@ -428,6 +428,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             local_bind: "0.0.0.0:0".parse().unwrap(),
             speed: 1.0,
             fault: FaultInjection::OFF,
+            looping: false,
         };
         let n = replay_udp_from_file(&opts)?;
         println!("ok sent={n}");
@@ -442,6 +443,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
             fault: FaultInjection::OFF,
+            looping: false,
         };
         let n = replay_tcp_from_file(&opts, &stop)?;
         println!("ok sent={n}");
@@ -457,6 +459,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
             fault: FaultInjection::OFF,
+            looping: false,
         };
         let n = replay_mqtt_from_file(&opts)?;
         println!("ok sent={n}");
@@ -476,6 +479,7 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
         config,
         speed: 1.0,
         fault: FaultInjection::OFF,
+            looping: false,
     };
     let n = fieldreplay_engine::replay_serial_from_file(&opts)?;
     println!("ok sent={n}");
@@ -681,6 +685,7 @@ fn udp_loopback_check() -> io::Result<()> {
         local_bind: "127.0.0.1:0".parse().unwrap(),
         speed: 1.0,
         fault: FaultInjection::OFF,
+            looping: false,
     })?;
     let got = listener.join().map_err(|_| err_arg("接收线程 panic"))??;
     let _ = std::fs::remove_file(&fcap);
@@ -762,6 +767,7 @@ fn serial_loopback_check() -> io::Result<()> {
             config: SerialConfig::new("LOOP-B", 115_200),
             speed: 1.0,
             fault: FaultInjection::OFF,
+            looping: false,
         },
         &end_play,
     )?;
@@ -871,6 +877,7 @@ fn tcp_server_record_loopback() -> io::Result<()> {
             poll_timeout: Duration::from_millis(50),
             speed: 1.0,
             fault: FaultInjection::OFF,
+            looping: false,
         },
         &stop_play,
     )?;
@@ -960,6 +967,7 @@ fn tcp_client_record_loopback() -> io::Result<()> {
                 poll_timeout: Duration::from_millis(50),
                 speed: 1.0,
                 fault: FaultInjection::OFF,
+            looping: false,
             },
             &stop_play,
         )
@@ -1089,6 +1097,7 @@ fn mqtt_loopback_check() -> io::Result<()> {
         poll_timeout: Duration::from_millis(50),
         speed: 1.0,
         fault: FaultInjection::OFF,
+            looping: false,
     })?;
     listen_stop.store(true, Ordering::SeqCst);
     let got = collector

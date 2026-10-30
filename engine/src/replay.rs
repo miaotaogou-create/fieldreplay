@@ -152,6 +152,8 @@ pub struct ReplayOptions {
     /// 墙钟倍速；1.0=实时。非法值按 1.0。
     pub speed: f64,
     pub fault: FaultInjection,
+    /// 播完后回卷从头再放，直到 stop。
+    pub looping: bool,
 }
 
 pub fn replay_udp_from_file(opts: &ReplayOptions) -> io::Result<u64> {
@@ -196,13 +198,15 @@ pub fn replay_udp_from_file_with(
     let mut sent = 0u64;
     let mut rng = FaultRng::new();
     let fault = opts.fault.clamped();
+    let mut pass_matched = 0u64;
 
     eprintln!(
-        "重放中：{} → {}（按 relative_us，{}x，fromUs={from_us}{}）",
+        "重放中：{} → {}（按 relative_us，{}x，fromUs={from_us}{}{}）",
         opts.in_path.display(),
         opts.target,
         speed,
-        if fault.is_active() { "，故障注入" } else { "" }
+        if fault.is_active() { "，故障注入" } else { "" },
+        if opts.looping { "，循环" } else { "" }
     );
 
     reader.rewind_packets()?;
@@ -218,6 +222,20 @@ pub fn replay_udp_from_file_with(
             continue;
         }
         let Some(pkt) = reader.next_packet()? else {
+            if try_restart_loop(
+                opts.looping,
+                stop,
+                pass_matched,
+                &mut reader,
+                &mut base,
+                speed,
+                &mut skip_before_us,
+                &mut pass_matched,
+                sent,
+                on_progress,
+            )? {
+                continue;
+            }
             break;
         };
         if pkt.kind != PacketKind::Data {
@@ -230,6 +248,7 @@ pub fn replay_udp_from_file_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Udp) {
             continue;
         }
+        pass_matched += 1;
         if pkt.relative_us < skip_before_us {
             continue;
         }
@@ -276,6 +295,32 @@ fn take_pending_seek(
     Ok(Some(raw))
 }
 
+/// EOF 时若开启循环且本遍匹配过通道帧：回卷到 0 再放；返回 true 表示已重启。
+fn try_restart_loop(
+    looping: bool,
+    stop: &AtomicBool,
+    pass_matched: u64,
+    reader: &mut SessionReader,
+    base: &mut Instant,
+    speed: f64,
+    skip_before_us: &mut u64,
+    pass_matched_out: &mut u64,
+    sent: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<bool> {
+    if !looping || stop.load(Ordering::SeqCst) || pass_matched == 0 {
+        return Ok(false);
+    }
+    reader.rewind_packets()?;
+    *skip_before_us = 0;
+    *pass_matched_out = 0;
+    SessionClock::rebase_timeline(base, 0, speed);
+    if let Some(cb) = on_progress.as_mut() {
+        cb(sent, 0);
+    }
+    Ok(true)
+}
+
 pub fn replay_udp_path(
     path: impl AsRef<Path>,
     target: SocketAddr,
@@ -286,6 +331,7 @@ pub fn replay_udp_path(
         local_bind: "0.0.0.0:0".parse().unwrap(),
         speed: 1.0,
         fault: FaultInjection::OFF,
+        looping: false,
     };
     replay_udp_from_file(&opts)
 }
@@ -296,6 +342,8 @@ pub struct SerialReplayOptions {
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
     pub fault: FaultInjection,
+    /// 播完后回卷从头再放，直到 stop。
+    pub looping: bool,
 }
 
 pub fn replay_serial_from_file(opts: &SerialReplayOptions) -> io::Result<u64> {
@@ -355,13 +403,15 @@ pub fn replay_serial_with_port_with(
     let mut sent = 0u64;
     let mut rng = FaultRng::new();
     let fault = opts.fault.clamped();
+    let mut pass_matched = 0u64;
 
     eprintln!(
-        "重放中：{} → 串口 {}（按 relative_us，{}x，fromUs={from_us}{}）",
+        "重放中：{} → 串口 {}（按 relative_us，{}x，fromUs={from_us}{}{}）",
         opts.in_path.display(),
         opts.config.port_name,
         speed,
-        if fault.is_active() { "，故障注入" } else { "" }
+        if fault.is_active() { "，故障注入" } else { "" },
+        if opts.looping { "，循环" } else { "" }
     );
 
     reader.rewind_packets()?;
@@ -377,6 +427,20 @@ pub fn replay_serial_with_port_with(
             continue;
         }
         let Some(pkt) = reader.next_packet()? else {
+            if try_restart_loop(
+                opts.looping,
+                stop,
+                pass_matched,
+                &mut reader,
+                &mut base,
+                speed,
+                &mut skip_before_us,
+                &mut pass_matched,
+                sent,
+                on_progress,
+            )? {
+                continue;
+            }
             break;
         };
         if pkt.kind != PacketKind::Data {
@@ -389,6 +453,7 @@ pub fn replay_serial_with_port_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Serial) {
             continue;
         }
+        pass_matched += 1;
         if pkt.relative_us < skip_before_us {
             continue;
         }
@@ -427,6 +492,8 @@ pub struct TcpReplayOptions {
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
     pub fault: FaultInjection,
+    /// 播完后回卷从头再放，直到 stop（含连接事件）。
+    pub looping: bool,
 }
 
 /// 按会话内录制角色取反后建立连接，并把录到的 RX 数据按时间轴写回对端。
@@ -466,13 +533,14 @@ pub fn replay_tcp_from_file_with(
     let speed = SessionClock::clamp_speed(opts.speed);
     let fault = opts.fault.clamped();
     eprintln!(
-        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us，{}x，fromUs={from_us}{}）",
+        "重放中：{} → TCP {} {}（录制角色 {}，按 relative_us，{}x，fromUs={from_us}{}{}）",
         opts.in_path.display(),
         play_role.as_str(),
         opts.endpoint,
         recorded_cfg.role.as_str(),
         speed,
-        if fault.is_active() { "，故障注入" } else { "" }
+        if fault.is_active() { "，故障注入" } else { "" },
+        if opts.looping { "，循环" } else { "" }
     );
 
     let mut base = Instant::now();
@@ -483,6 +551,7 @@ pub fn replay_tcp_from_file_with(
     let mut sent = 0u64;
     let mut rng = FaultRng::new();
     let mut stream = None;
+    let mut pass_matched = 0u64;
 
     reader.rewind_packets()?;
     loop {
@@ -498,6 +567,21 @@ pub fn replay_tcp_from_file_with(
             continue;
         }
         let Some(pkt) = reader.next_packet()? else {
+            if try_restart_loop(
+                opts.looping,
+                stop,
+                pass_matched,
+                &mut reader,
+                &mut base,
+                speed,
+                &mut skip_before_us,
+                &mut pass_matched,
+                sent,
+                on_progress,
+            )? {
+                stream = None;
+                continue;
+            }
             break;
         };
         let ch = reader
@@ -507,6 +591,7 @@ pub fn replay_tcp_from_file_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Tcp) {
             continue;
         }
+        pass_matched += 1;
 
         // seek 目标之前：连接事件仍立即处理；数据帧跳过
         if pkt.relative_us < skip_before_us {
@@ -612,6 +697,8 @@ pub struct MqttReplayOptions {
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
     pub fault: FaultInjection,
+    /// 播完后回卷从头再放，直到 stop。
+    pub looping: bool,
 }
 
 /// 连接 Broker，按时间轴把 MQTT 数据帧 PUBLISH 出去（演设备/传感器）。
@@ -655,13 +742,14 @@ pub fn replay_mqtt_from_file_with(
     let speed = SessionClock::clamp_speed(opts.speed);
     let fault = opts.fault.clamped();
     eprintln!(
-        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us，{}x，fromUs={from_us}{}）",
+        "重放中：{} → MQTT {}:{} prefix={:?}（按 relative_us，{}x，fromUs={from_us}{}{}）",
         opts.in_path.display(),
         config.broker,
         config.port,
         opts.topic_prefix,
         speed,
-        if fault.is_active() { "，故障注入" } else { "" }
+        if fault.is_active() { "，故障注入" } else { "" },
+        if opts.looping { "，循环" } else { "" }
     );
 
     let mut client = MqttClient::connect(&config, opts.poll_timeout)?;
@@ -672,6 +760,7 @@ pub fn replay_mqtt_from_file_with(
     }
     let mut sent = 0u64;
     let mut rng = FaultRng::new();
+    let mut pass_matched = 0u64;
 
     reader.rewind_packets()?;
     loop {
@@ -686,6 +775,20 @@ pub fn replay_mqtt_from_file_with(
             continue;
         }
         let Some(pkt) = reader.next_packet()? else {
+            if try_restart_loop(
+                opts.looping,
+                stop,
+                pass_matched,
+                &mut reader,
+                &mut base,
+                speed,
+                &mut skip_before_us,
+                &mut pass_matched,
+                sent,
+                on_progress,
+            )? {
+                continue;
+            }
             break;
         };
         if pkt.kind != PacketKind::Data {
@@ -698,6 +801,7 @@ pub fn replay_mqtt_from_file_with(
         if ch.map(|c| c.channel_type) != Some(ChannelType::Mqtt) {
             continue;
         }
+        pass_matched += 1;
         if pkt.relative_us < skip_before_us {
             continue;
         }

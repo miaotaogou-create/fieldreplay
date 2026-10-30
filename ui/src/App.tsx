@@ -246,12 +246,14 @@ export default function App() {
             corruptCrc: !!faultCfg.corruptCrc,
           }
         : undefined;
+    const loop = !!cfg.loop;
     await engine.startReplay({
       type: mapped.type,
       config: mapped.config,
       topicPrefix: mapped.topicPrefix,
       speed,
       fromUs: startUs,
+      loop,
       fault,
     });
     const faultHint =
@@ -260,10 +262,11 @@ export default function App() {
             fault.corruptCrc ? ' 篡改' : ''
           }`
         : '';
+    const loopHint = loop ? ' · 循环' : '';
     showToast(
       speed === 1
-        ? `已开始引擎重放：${mapped.type}${faultHint}`
-        : `已开始引擎重放：${mapped.type}（${speed}x）${faultHint}`
+        ? `已开始引擎重放：${mapped.type}${faultHint}${loopHint}`
+        : `已开始引擎重放：${mapped.type}（${speed}x）${faultHint}${loopHint}`
     );
   };
 

@@ -80,6 +80,9 @@ export interface EngineReplayStartResult {
   type: string;
   config: Record<string, unknown>;
   durationUs: number;
+  speed?: number;
+  fromUs?: number;
+  loop?: boolean;
 }
 
 export interface EngineReplayStopResult {

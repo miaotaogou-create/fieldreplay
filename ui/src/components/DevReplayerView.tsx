@@ -589,21 +589,25 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
             <button
               type="button"
-              disabled={useEngineReplay}
-              title={useEngineReplay ? '引擎重放暂不支持循环（恒速一遍）' : undefined}
+              title={
+                useEngineReplay
+                  ? engineBusy
+                    ? '循环在起播时生效；播放中切换将用于下次起播'
+                    : '引擎重放：播完回卷，直到停止'
+                  : '离线演示循环'
+              }
               onClick={() => {
-                if (useEngineReplay) return;
                 const next = !isLooping;
                 setIsLooping(next);
                 setReplayConfig((cfg) => ({ ...cfg, loop: next }));
               }}
-              className={`px-2.5 py-1 text-xs rounded-md border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-                isLooping && !useEngineReplay
+              className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${
+                isLooping
                   ? 'bg-slate-800 text-sky-400 border-sky-500/50'
                   : 'bg-slate-900 text-slate-500 border-slate-800'
               }`}
             >
-              循环: {useEngineReplay ? '引擎关' : isLooping ? '开' : '关'}
+              循环: {isLooping ? '开' : '关'}
             </button>
           </div>
 

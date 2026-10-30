@@ -435,6 +435,7 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_replay_pause_via_ws(&mut client, &path)?;
     self_check_replay_seek_via_ws(&mut client, &path)?;
     self_check_replay_fault_via_ws(&mut client, &path)?;
+    self_check_replay_loop_via_ws(&mut client, &path)?;
     self_check_record_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
@@ -939,6 +940,116 @@ fn self_check_replay_fault_via_ws(client: &mut TcpStream, session_path: &Path) -
 
     eprintln!("  控制面 replay.fault 100% 丢包：通过");
     Ok(())
+}
+
+/// 验证 `replay.start.loop`：高速循环后 sent 超过单遍帧数，再 stop。
+fn self_check_replay_loop_via_ws(client: &mut TcpStream, session_path: &Path) -> io::Result<()> {
+    let recv = UdpSocket::bind("127.0.0.1:0")?;
+    recv.set_read_timeout(Some(Duration::from_millis(50)))?;
+    let target = recv.local_addr()?;
+
+    let open = format!(
+        r#"{{"id":"l0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(session_path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "loop 自检未收到 session.open")
+    })?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("loop 自检 session.open 失败: {opened}"),
+        ));
+    }
+
+    let start = format!(
+        r#"{{"id":"l1","cmd":"replay.start","type":"udp","speed":20,"loop":true,"config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        target.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = read_text_frame(client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "loop 自检未收到 replay.start")
+    })?;
+    if !started.contains("\"ok\":true") || !started.contains("\"started\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("loop 自检 replay.start 失败: {started}"),
+        ));
+    }
+    if !started.contains("\"loop\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("loop 自检未回显 loop:true: {started}"),
+        ));
+    }
+
+    // sample 约 2 帧；循环后 sent≥3 即越过单遍
+    let mut max_sent = 0u64;
+    let mut saw_wrap = false;
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    client.set_read_timeout(Some(Duration::from_millis(100)))?;
+    while std::time::Instant::now() < deadline && !saw_wrap {
+        let mut buf = [0u8; 256];
+        let _ = recv.recv_from(&mut buf);
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"replay.done\"") {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("循环重放不应在 stop 前自然 done: {frame}"),
+                    ));
+                }
+                if let Some(s) = extract_progress_sent(&frame) {
+                    if s > max_sent {
+                        max_sent = s;
+                    }
+                    if s >= 3 {
+                        saw_wrap = true;
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    write_text_frame_client(client, r#"{"id":"l2","cmd":"replay.stop"}"#)?;
+    let stopped = drain_until_id(client, "l2")?;
+    if !stopped.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("loop 自检 replay.stop 失败: {stopped}"),
+        ));
+    }
+
+    if !saw_wrap {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("循环重放未越过单遍（max sent={max_sent}，期望≥3）"),
+        ));
+    }
+
+    eprintln!("  控制面 replay.loop：通过");
+    Ok(())
+}
+
+/// 从 progress 推送里抠 sent（粗解析）。
+fn extract_progress_sent(frame: &str) -> Option<u64> {
+    if !frame.contains("\"event\":\"replay.progress\"") {
+        return None;
+    }
+    let key = "\"sent\":";
+    let i = frame.find(key)?;
+    let rest = &frame[i + key.len()..];
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
 }
 
 /// 读到匹配 `id` 的响应；其间丢弃推送事件。

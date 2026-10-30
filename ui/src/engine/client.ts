@@ -198,6 +198,8 @@ export class EngineClient {
     speed?: number;
     /** 从该相对微秒起播（跳过更早数据帧） */
     fromUs?: number;
+    /** 播完后回卷循环，直到 stop */
+    loop?: boolean;
     /** 引擎侧故障注入（丢包 / 篡改载荷） */
     fault?: {
       enabled: boolean;

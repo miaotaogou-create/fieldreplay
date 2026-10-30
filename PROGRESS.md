@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | 可选：真实 IO 端到端勾选；循环重放；**E7 视频后置** |
+| **下一步** | 可选：真实 IO 端到端勾选；**E7 视频后置** |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -131,6 +131,7 @@ fieldreplay/
 | E9 | 引擎重放真实暂停（`replay.pause` / `resume`） | [x] | 2026-10-30：时钟冻结时间轴；四通道 + 控制面 + UI 暂停/继续；复位仍走 stop；循环/seek 仍后置 |
 | E10 | 引擎重放 seek（`replay.seek` / `fromUs`） | [x] | 2026-10-30：回卷读头 + 校准时钟；播放/暂停中可拖进度条；启动可从当前头起播；循环仍后置 |
 | E11 | 引擎重放故障注入（`replay.start.fault`） | [x] | 2026-10-30：丢包率 + 篡改载荷；四通道热路径；控制面/UI 接通；self-check 100% 丢包通过；循环仍后置 |
+| E12 | 引擎重放循环（`replay.start.loop`） | [x] | 2026-10-30：EOF 回卷时间轴；四通道 + 控制面/UI 接通；self-check 越过单遍后 stop 通过 |
 
 ### E6d 手测清单（2026-10-29，`pack\FieldReplay\fieldreplay.exe`）
 
@@ -150,9 +151,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7** 视频后置；或真实 IO 验收 / 循环重放）
+1. 读 `PROGRESS.md` → 只做小任务板里 **第一个未勾选** 项（现在是 **E7** 视频后置；或真实 IO 端到端验收）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / **E8–E11** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / **打包 E6** / **E8–E12** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -194,3 +195,4 @@ fieldreplay/
 | 2026-10-30 | E9：`replay.pause`/`resume`；暂停期间墙钟不计入时间轴；UI 接通 | 进度本「真实暂停」；复位仍 `replay.stop` |
 | 2026-10-30 | E10：`replay.seek` + `replay.start.fromUs`；进度条/故障点跳转接通引擎 | 播放中可 scrub；TCP seek 会重跑连接事件 |
 | 2026-10-30 | E11：`replay.start.fault`（丢包率 + 篡改载荷）；UI 启用后随引擎重放生效 | 热路径扰动原始字节；不解析业务 CRC；循环仍后置 |
+| 2026-10-30 | E12：`replay.start.loop`；EOF 回卷；UI 循环开关接通引擎 | 空遍不空转；`loop:true` 仅 stop 才 `replay.done` |

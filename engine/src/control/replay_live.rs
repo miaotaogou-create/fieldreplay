@@ -58,6 +58,7 @@ pub fn handle_replay_start(
     let from_us = extract_u64(msg, "fromUs")
         .or_else(|| extract_u64(msg, "from_us"))
         .unwrap_or(0);
+    let looping = extract_bool(msg, "loop").unwrap_or(false);
     let fault = parse_fault(msg);
 
     let (in_path, duration_us) = {
@@ -101,6 +102,7 @@ pub fn handle_replay_start(
             duration_us,
             speed,
             from_us,
+            looping,
             fault,
             &stop_c,
             &paused_c,
@@ -133,13 +135,14 @@ pub fn handle_replay_start(
     ok_result(
         id,
         &format!(
-            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us},\"fault\":{{\"enabled\":{},\"lossRatePercent\":{},\"corruptCrc\":{}}}}}",
+            "{{\"started\":true,\"type\":\"{}\",\"config\":{},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us},\"loop\":{},\"fault\":{{\"enabled\":{},\"lossRatePercent\":{},\"corruptCrc\":{}}}}}",
             escape_str(&ty),
             if config_raw.trim().is_empty() {
                 "{}"
             } else {
                 config_raw.as_str()
             },
+            if looping { "true" } else { "false" },
             if fault.enabled { "true" } else { "false" },
             fault.loss_rate_percent,
             if fault.corrupt_payload {
@@ -266,6 +269,7 @@ fn run_replay(
     duration_us: u64,
     speed: f64,
     from_us: u64,
+    looping: bool,
     fault: FaultInjection,
     stop: &AtomicBool,
     paused: &AtomicBool,
@@ -294,6 +298,7 @@ fn run_replay(
                 local_bind: "0.0.0.0:0".parse().unwrap(),
                 speed,
                 fault,
+                looping,
             };
             replay_udp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
@@ -304,6 +309,7 @@ fn run_replay(
                 config: cfg,
                 speed,
                 fault,
+                looping,
             };
             let port = SerialPort::open(&opts.config, poll)?;
             replay_serial_with_port_with(&opts, &port, stop, paused, seek_us, from_us, &mut on)
@@ -316,6 +322,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
                 fault,
+                looping,
             };
             replay_tcp_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
@@ -336,6 +343,7 @@ fn run_replay(
                 poll_timeout: poll,
                 speed,
                 fault,
+                looping,
             };
             replay_mqtt_from_file_with(&opts, stop, paused, seek_us, from_us, &mut on)
         }
