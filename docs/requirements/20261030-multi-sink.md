@@ -38,6 +38,15 @@ E11 已打通多通道共享时间轴录制与对齐重放，但多路 `targets[
 
 E12a 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 
+## E12b 验收
+
+- [x] `multi_replay` 支持同会话串口目标（可与 UDP/视频 UDP/TCP 并存），按相对时间轴写 Data
+- [x] 控制面：`targets[]` 允许 `serial`；打开失败 → 整次 `replay.start` 失败
+- [x] `self-check`：UDP+串口对齐重放，两路载荷抽查正确（`self_check_multi_udp_serial_replay`，内存环回）
+- [x] 既有多路 UDP/UDP+TCP 与单路串口行为不回归
+
+E12b 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
+
 ## 非目标（本增强整轮）
 
 - 多路 RTSP 服务端
@@ -46,4 +55,4 @@ E12a 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 
 ## 建议下一手
 
-E12a 收口后做 E12b 串口 → E12c MQTT → E12d UI。
+E12c MQTT → E12d UI。

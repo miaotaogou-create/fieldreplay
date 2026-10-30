@@ -60,14 +60,14 @@
 - [x] 缺目标通道跳过并可观测（响应 `skipped[]`）；有目标通道载荷抽查与录制一致
 - [x] `self-check`：两路 UDP 同会话对齐重放（`self_check_multi_udp_replay`）
 
-已知限制（E11c，部分已由 E12a 解除）：多路 `targets[]` 已支持 **UDP / 视频(UDP 推送) / TCP**；串口/MQTT/RTSP listen 请仍用单路，或见 `20261030-multi-sink.md`。
+已知限制（E11c，部分已由 E12a/b 解除）：多路 `targets[]` 已支持 **UDP / 视频(UDP 推送) / TCP / 串口**；MQTT/RTSP listen 请仍用单路，或见 `20261030-multi-sink.md`。
 
 ## E11d 验收
 
 - [x] UI 重演：可为会话内各通道配置目标并一键开始（≥2 通道时下发 `targets[]`；单通道仍走协议页）
 - [x] 进度与完成事件反映整会话（沿用 E11c 统一时间轴 `replay.progress` / `replay.done`；响应可见 `skipped[]`）
 
-已知限制：多路 UI 本阶段仍仅 UDP / 视频 UDP（引擎 E12a 已支持 TCP；UI 放开见 E12d）；串口/MQTT 在多通道会话中仍标为跳过。
+已知限制：多路 UI 本阶段仍仅 UDP / 视频 UDP（引擎 E12a/b 已支持 TCP/串口；UI 放开见 E12d）；MQTT 在多通道会话中仍标为跳过。
 
 ## 非目标（本增强整轮）
 

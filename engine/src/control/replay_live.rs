@@ -11,8 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::fcap::ChannelType;
 use crate::mqtt::MqttConfig;
 use crate::multi_replay::{
-    open_datagram_target, open_tcp_multi_target, replay_multi_from_file_with, MultiReplayOptions,
-    MultiReplayTarget,
+    open_datagram_target, open_serial_multi_target, open_tcp_multi_target,
+    replay_multi_from_file_with, MultiReplayOptions, MultiReplayTarget,
 };
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
@@ -198,6 +198,10 @@ enum BoundMulti {
         endpoint: SocketAddr,
         play_role: TcpRole,
     },
+    Serial {
+        ch: u16,
+        config: SerialConfig,
+    },
 }
 
 fn start_multi_replay(
@@ -238,11 +242,12 @@ fn start_multi_replay(
             "udp" => ChannelType::Udp,
             "video" | "video_stream" => ChannelType::Video,
             "tcp" => ChannelType::Tcp,
-            "serial" | "mqtt" => {
+            "serial" => ChannelType::Serial,
+            "mqtt" => {
                 return err_result(
                     id,
                     &format!(
-                        "targets[{i}] 多路对齐重放暂不支持 {ty_s}（E12a 已支持 tcp；串口/MQTT 见后续）"
+                        "targets[{i}] 多路对齐重放暂不支持 mqtt（E12b 已支持 serial；MQTT 见 E12c）"
                     ),
                 );
             }
@@ -314,6 +319,13 @@ fn start_multi_replay(
                     play_role: recorded.role.invert(),
                 });
             }
+            ChannelType::Serial => {
+                let cfg = match parse_serial(&config_raw) {
+                    Ok(c) => c,
+                    Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
+                };
+                bound.push(BoundMulti::Serial { ch, config: cfg });
+            }
             _ => {
                 return err_result(id, &format!("targets[{i}] 内部错误：未处理类型"));
             }
@@ -380,6 +392,14 @@ fn start_multi_replay(
                     *play_role,
                     Duration::from_millis(200),
                 )));
+            }
+            BoundMulti::Serial { ch, config } => {
+                match open_serial_multi_target(*ch, config, Duration::from_millis(200)) {
+                    Ok(t) => sinks.push(MultiReplayTarget::Serial(t)),
+                    Err(e) => {
+                        return err_result(id, &format!("打开目标通道 {ch} 失败: {e}"));
+                    }
+                }
             }
         }
     }

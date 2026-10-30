@@ -1,6 +1,6 @@
 //! 多通道对齐重放（E11c / E12）：单一相对时间轴，按 `channel_index` 扇出到各目标。
 //!
-//! ponytail: E12a 起 sink 含 UDP/视频(UDP) 与 TCP；串口/MQTT/RTSP 多路目标见 E12b/c。
+//! ponytail: E12a/b sink 含 UDP/视频(UDP)、TCP、串口；MQTT/RTSP 多路见 E12c。
 //! 天花板是混合类型需各 sink 进同一调度器；升级路径继续往 `MultiReplayTarget` 加变体。
 
 use std::io;
@@ -15,6 +15,7 @@ use crate::replay::{
     emit_with_fault, take_pending_seek, try_restart_loop, FaultInjection, FaultRng,
     OnReplayProgress,
 };
+use crate::serial::{SerialConfig, SerialPort};
 use crate::tcp::{accept_until, connect, listen, write_all, TcpRole};
 use crate::udp::{bind_sender, send_to};
 
@@ -35,10 +36,18 @@ pub struct TcpMultiTarget {
     pub stream: Option<TcpStream>,
 }
 
-/// 多路重放目标（E12a：UDP + TCP）。
+/// 一路串口多路目标（启动时已打开；与单路一样只写 Data）。
+pub struct SerialMultiTarget {
+    pub channel_index: u16,
+    pub port_name: String,
+    pub port: SerialPort,
+}
+
+/// 多路重放目标（E12a/b：UDP + TCP + 串口）。
 pub enum MultiReplayTarget {
     Udp(DatagramTarget),
     Tcp(TcpMultiTarget),
+    Serial(SerialMultiTarget),
 }
 
 impl MultiReplayTarget {
@@ -46,6 +55,7 @@ impl MultiReplayTarget {
         match self {
             Self::Udp(t) => t.channel_index,
             Self::Tcp(t) => t.channel_index,
+            Self::Serial(t) => t.channel_index,
         }
     }
 
@@ -53,6 +63,7 @@ impl MultiReplayTarget {
         match self {
             Self::Udp(t) => t.expect,
             Self::Tcp(_) => ChannelType::Tcp,
+            Self::Serial(_) => ChannelType::Serial,
         }
     }
 
@@ -65,6 +76,7 @@ impl MultiReplayTarget {
                 t.play_role.as_str(),
                 t.endpoint
             ),
+            Self::Serial(t) => format!("{}→serial:{}", t.channel_index, t.port_name),
         }
     }
 
@@ -217,9 +229,12 @@ pub fn replay_multi_from_file_with(
             continue;
         };
 
-        // UDP/视频：只关心 Data；TCP：连接事件也计入本趟匹配
-        let is_udp = matches!(targets[ti], MultiReplayTarget::Udp(_));
-        if is_udp && pkt.kind != PacketKind::Data {
+        // UDP/视频/串口：只关心 Data；TCP：连接事件也计入本趟匹配
+        let data_only = matches!(
+            targets[ti],
+            MultiReplayTarget::Udp(_) | MultiReplayTarget::Serial(_)
+        );
+        if data_only && pkt.kind != PacketKind::Data {
             continue;
         }
         if matches!(targets[ti], MultiReplayTarget::Tcp(_))
@@ -276,6 +291,17 @@ pub fn replay_multi_from_file_with(
                     &mut sent,
                     on_progress,
                     |bytes| send_to(&tgt.sock, bytes, tgt.addr).map(|_| ()),
+                )?;
+            }
+            MultiReplayTarget::Serial(tgt) => {
+                emit_with_fault(
+                    &pkt.payload,
+                    &fault,
+                    &mut rng,
+                    pkt.relative_us,
+                    &mut sent,
+                    on_progress,
+                    |bytes| tgt.port.write_all(bytes),
                 )?;
             }
             MultiReplayTarget::Tcp(tgt) => match pkt.kind {
@@ -407,6 +433,33 @@ pub fn open_tcp_multi_target(
         play_role,
         poll_timeout,
         stream: None,
+    }
+}
+
+/// 打开串口多路目标；失败则整次失败。
+pub fn open_serial_multi_target(
+    channel_index: u16,
+    config: &SerialConfig,
+    poll_timeout: Duration,
+) -> io::Result<SerialMultiTarget> {
+    let port = SerialPort::open(config, poll_timeout)?;
+    Ok(SerialMultiTarget {
+        channel_index,
+        port_name: config.port_name.clone(),
+        port,
+    })
+}
+
+/// 自检用：注入已打开的串口（内存环回或实口）。
+pub fn serial_multi_target_with_port(
+    channel_index: u16,
+    port_name: impl Into<String>,
+    port: SerialPort,
+) -> SerialMultiTarget {
+    SerialMultiTarget {
+        channel_index,
+        port_name: port_name.into(),
+        port,
     }
 }
 
@@ -835,5 +888,146 @@ pub fn self_check_multi_udp_tcp_replay() -> io::Result<()> {
     }
 
     eprintln!("  多路 UDP+TCP 对齐重放自检：通过（sent={sent}）");
+    Ok(())
+}
+
+/// E12b：同会话 UDP + 串口对齐重放（串口侧内存环回）。
+pub fn self_check_multi_udp_serial_replay() -> io::Result<()> {
+    use std::net::UdpSocket;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Instant;
+
+    use crate::fcap::{
+        ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionWriter,
+    };
+
+    // ponytail: 合成多通道会话，避免为自检改 ChannelJob::Clone 注入 Mem 口；
+    // 天花板是未覆盖多路录制串口路径（该路径生产已开实口）；升级可加 SerialPort 注入。
+    let out = std::env::temp_dir().join(format!(
+        "fieldreplay_multi_udp_serial_{}.fcap",
+        std::process::id()
+    ));
+    {
+        let channels = [
+            ChannelEntry {
+                channel_index: 0,
+                channel_type: ChannelType::Udp,
+                name: "u0".into(),
+                config_json: r#"{"bind_ip":"127.0.0.1","bind_port":0,"peer_ip":"","peer_port":0}"#
+                    .into(),
+            },
+            ChannelEntry {
+                channel_index: 1,
+                channel_type: ChannelType::Serial,
+                name: "s1".into(),
+                config_json: SerialConfig::new("LOOP-REC", 115_200).to_config_json(),
+            },
+        ];
+        let mut w = SessionWriter::create(&out, 1_700_000_000_000_000, &channels, None)?;
+        for (us, ch, payload) in [
+            (10_000u64, 0u16, &b"U1"[..]),
+            (20_000, 1, &b"S1"[..]),
+            (30_000, 0, &b"U2"[..]),
+            (40_000, 1, &b"S2"[..]),
+        ] {
+            w.append_packet(&PacketRecord {
+                relative_us: us,
+                channel_index: ch,
+                kind: PacketKind::Data,
+                direction: 0,
+                flags: 0,
+                aux: Vec::new(),
+                payload: payload.to_vec(),
+            })?;
+        }
+        w.finalize()?;
+    }
+
+    let udp_rx = UdpSocket::bind("127.0.0.1:0")?;
+    udp_rx.set_read_timeout(Some(Duration::from_millis(800)))?;
+    let udp_rx_addr = udp_rx.local_addr()?;
+
+    let (end_play, end_listen) = SerialPort::open_loopback_pair(Duration::from_millis(200));
+    let serial_got = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+    let serial_got_c = Arc::clone(&serial_got);
+    let listener = thread::spawn(move || -> io::Result<()> {
+        let mut buf = [0u8; 64];
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut out = Vec::new();
+        while out.len() < 2 && Instant::now() < deadline {
+            if let Some(n) = end_listen.read(&mut buf)? {
+                if n > 0 {
+                    out.push(buf[..n].to_vec());
+                }
+            }
+        }
+        *serial_got_c.lock().unwrap() = out;
+        Ok(())
+    });
+
+    let mut targets = vec![
+        MultiReplayTarget::Udp(open_datagram_target(
+            0,
+            ChannelType::Udp,
+            udp_rx_addr,
+            "0.0.0.0:0".parse().unwrap(),
+        )?),
+        MultiReplayTarget::Serial(serial_multi_target_with_port(1, "LOOP-PLAY", end_play)),
+    ];
+
+    let stop_r = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
+    let seek = AtomicU64::new(SessionClock::NO_SEEK);
+    let mut on: OnReplayProgress<'_> = None;
+    let sent = replay_multi_from_file_with(
+        &MultiReplayOptions {
+            in_path: out.clone(),
+            speed: 50.0,
+            fault: FaultInjection::OFF,
+            looping: false,
+        },
+        &mut targets,
+        &stop_r,
+        &paused,
+        &seek,
+        0,
+        &mut on,
+    );
+    let _ = std::fs::remove_file(&out);
+    let sent = sent?;
+    if sent < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP+串口重放发送帧数不足: {sent}"),
+        ));
+    }
+
+    listener
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "串口接收线程 panic"))??;
+
+    let mut got_u = Vec::new();
+    let mut buf = [0u8; 64];
+    for _ in 0..8 {
+        if let Ok((n, _)) = udp_rx.recv_from(&mut buf) {
+            got_u.push(buf[..n].to_vec());
+        }
+    }
+    if got_u.len() < 2 || got_u[0] != b"U1" || got_u[1] != b"U2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP 通道载荷不符: {:?}", got_u),
+        ));
+    }
+    let got_s = serial_got.lock().unwrap().clone();
+    if got_s.len() < 2 || got_s[0] != b"S1" || got_s[1] != b"S2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("串口通道载荷不符: {:?}", got_s),
+        ));
+    }
+
+    eprintln!("  多路 UDP+串口对齐重放自检：通过（sent={sent}）");
     Ok(())
 }
