@@ -1,16 +1,41 @@
-//! 录制相对时间基（微秒）。
+//! 录制相对时间基（微秒）；重放可中断等待。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// 会话时钟：录制起点墙钟 + 相对微秒。
+/// 录制暂停共享状态：多线程读 `relative_us`，控制面调 pause/resume。
+#[derive(Debug)]
+struct RecordPause {
+    paused: AtomicBool,
+    /// 已累计暂停墙钟（微秒），从墙钟流逝中扣除。
+    accum_us: AtomicU64,
+    /// 进入暂停时冻结的相对戳；未暂停为 [`SessionClock::NO_FREEZE`]。
+    frozen_us: AtomicU64,
+}
+
+impl Default for RecordPause {
+    fn default() -> Self {
+        Self {
+            paused: AtomicBool::new(false),
+            accum_us: AtomicU64::new(0),
+            frozen_us: AtomicU64::new(SessionClock::NO_FREEZE),
+        }
+    }
+}
+
+/// 会话时钟：录制起点墙钟 + 相对微秒（可冻结）。
 #[derive(Debug, Clone)]
 pub struct SessionClock {
     start: Instant,
     start_wall_unix_us: u64,
+    pause: Arc<RecordPause>,
 }
 
 impl SessionClock {
+    /// 未冻结时的哨兵。
+    pub const NO_FREEZE: u64 = u64::MAX;
+
     pub fn start() -> Self {
         let start_wall_unix_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -19,6 +44,7 @@ impl SessionClock {
         Self {
             start: Instant::now(),
             start_wall_unix_us,
+            pause: Arc::new(RecordPause::default()),
         }
     }
 
@@ -26,8 +52,54 @@ impl SessionClock {
         self.start_wall_unix_us
     }
 
+    /// 会话相对微秒；暂停中返回冻结值，恢复后从该值继续（暂停墙钟不计入）。
     pub fn relative_us(&self) -> u64 {
-        self.start.elapsed().as_micros() as u64
+        if self.pause.paused.load(Ordering::SeqCst) {
+            let f = self.pause.frozen_us.load(Ordering::SeqCst);
+            if f != Self::NO_FREEZE {
+                return f;
+            }
+        }
+        let raw = self.start.elapsed().as_micros() as u64;
+        raw.saturating_sub(self.pause.accum_us.load(Ordering::SeqCst))
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.pause.paused.load(Ordering::SeqCst)
+    }
+
+    /// 冻结相对轴。已暂停返回 `false`（幂等）。
+    pub fn pause(&self) -> bool {
+        if self.pause.paused.load(Ordering::SeqCst) {
+            return false;
+        }
+        let raw = self.start.elapsed().as_micros() as u64;
+        let accum = self.pause.accum_us.load(Ordering::SeqCst);
+        let frozen = raw.saturating_sub(accum);
+        self.pause.frozen_us.store(frozen, Ordering::SeqCst);
+        self.pause.paused.store(true, Ordering::SeqCst);
+        true
+    }
+
+    /// 解除冻结，相对轴从冻结值继续。未暂停返回 `false`（幂等）。
+    pub fn resume(&self) -> bool {
+        if !self.pause.paused.load(Ordering::SeqCst) {
+            return false;
+        }
+        let frozen = self.pause.frozen_us.load(Ordering::SeqCst);
+        let frozen = if frozen == Self::NO_FREEZE {
+            let raw = self.start.elapsed().as_micros() as u64;
+            raw.saturating_sub(self.pause.accum_us.load(Ordering::SeqCst))
+        } else {
+            frozen
+        };
+        let raw = self.start.elapsed().as_micros() as u64;
+        self.pause
+            .accum_us
+            .store(raw.saturating_sub(frozen), Ordering::SeqCst);
+        self.pause.frozen_us.store(Self::NO_FREEZE, Ordering::SeqCst);
+        self.pause.paused.store(false, Ordering::SeqCst);
+        true
     }
 
     /// 无挂起 seek 时的哨兵值（存入 `AtomicU64`）。
@@ -205,6 +277,36 @@ mod tests {
                 &mut base, 1_000_000, 1.0, &stop, &paused, &seek
             ),
             WaitResult::Seek
+        );
+    }
+
+    #[test]
+    fn record_pause_freezes_relative_us() {
+        let clock = SessionClock::start();
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(clock.pause());
+        assert!(!clock.pause(), "已暂停应幂等");
+        assert!(clock.is_paused());
+        let frozen = clock.relative_us();
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(
+            clock.relative_us(),
+            frozen,
+            "暂停中相对轴应冻结"
+        );
+        assert!(clock.resume());
+        assert!(!clock.resume(), "未暂停应幂等");
+        std::thread::sleep(Duration::from_millis(20));
+        let after = clock.relative_us();
+        assert!(
+            after >= frozen,
+            "恢复后相对轴应 ≥ 冻结值: frozen={frozen} after={after}"
+        );
+        // 暂停 80ms 墙钟不应计入；恢复后仅再走约 20ms
+        assert!(
+            after.saturating_sub(frozen) < 60_000,
+            "暂停墙钟不应计入相对轴: delta={}",
+            after - frozen
         );
     }
 }

@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
+use crate::clock::SessionClock;
 use crate::fcap::{ChannelEntry, PacketRecord};
 use crate::multi_record::LiveRecordSink;
 
@@ -16,6 +17,8 @@ pub struct ActiveRecording {
     pub join: Option<JoinHandle<std::io::Result<u64>>>,
     /// 录制线程就绪后填入，供 `session.addMarker` 热写。
     pub live_sink: Arc<Mutex<Option<Arc<LiveRecordSink>>>>,
+    /// 与写盘同钟；`record.pause`/`resume` 冻结相对轴。
+    pub clock: SessionClock,
 }
 
 pub struct ActiveReplay {

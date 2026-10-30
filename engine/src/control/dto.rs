@@ -41,10 +41,15 @@ pub fn status_json(g: &ControlState) -> String {
 
 pub fn recording_status_json(active: &ActiveRecording) -> String {
     format!(
-        "{{\"out\":\"{}\",\"packetCount\":{},\"type\":\"{}\"}}",
+        "{{\"out\":\"{}\",\"packetCount\":{},\"type\":\"{}\",\"paused\":{}}}",
         escape_str(&active.out_path.to_string_lossy()),
         active.packet_count.load(Ordering::SeqCst),
-        escape_str(&active.channel_type)
+        escape_str(&active.channel_type),
+        if active.clock.is_paused() {
+            "true"
+        } else {
+            "false"
+        }
     )
 }
 

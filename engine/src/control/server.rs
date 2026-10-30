@@ -1,5 +1,5 @@
 //! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
-//! E13b：`session.addMarker`；E13c：`session.trim`；E14c：`session.importPcap`。
+//! E13b：`session.addMarker`；E13c：`session.trim`；E14c：`session.importPcap`；E16b：`record.pause`/`resume`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -19,7 +19,9 @@ use super::json_util::{
     err_result, escape_str, extract_object, extract_str, extract_u64, ok_result,
 };
 use super::import_pcap::handle_session_import_pcap;
-use super::live::{handle_record_start, handle_record_stop};
+use super::live::{
+    handle_record_pause, handle_record_resume, handle_record_start, handle_record_stop,
+};
 use super::marker::handle_session_add_marker;
 use super::replay_live::{
     handle_replay_pause, handle_replay_resume, handle_replay_seek, handle_replay_start,
@@ -218,6 +220,14 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             }
             reply
         }
+        "record.pause" => match state.lock() {
+            Ok(mut g) => handle_record_pause(&id, &mut g),
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
+        "record.resume" => match state.lock() {
+            Ok(mut g) => handle_record_resume(&id, &mut g),
+            Err(_) => err_result(&id, "状态锁损坏"),
+        },
         "replay.start" => match state.lock() {
             Ok(mut g) => {
                 g.reap_finished_replay();
@@ -529,6 +539,8 @@ pub fn self_check_control() -> io::Result<()> {
     // E14c：pcap 导入（独立样本；默认替换内存会话）
     self_check_import_pcap_via_ws(&mut client)?;
     self_check_record_via_ws(&mut client)?;
+    // E16b：录制 pause/resume + 相对戳冻结
+    self_check_record_pause_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
     Ok(())
@@ -1686,6 +1698,194 @@ fn self_check_record_via_ws(client: &mut TcpStream) -> io::Result<()> {
     }
 
     eprintln!("  控制面 record.start/stop UDP 环回 + 热插 marker：通过");
+    Ok(())
+}
+
+/// E16b：录制 pause → 墙钟等待 → resume；相对戳连续；暂停中 marker 冻结；paused 下可 stop。
+fn self_check_record_pause_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    // 空闲态 pause 应拒绝
+    write_text_frame_client(client, r#"{"id":"e16b-idle","cmd":"record.pause"}"#)?;
+    let idle = drain_until_id(client, "e16b-idle")?;
+    if idle.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("空闲态 record.pause 应失败: {idle}"),
+        ));
+    }
+
+    let probe = UdpSocket::bind("127.0.0.1:0")?;
+    let udp_addr = probe.local_addr()?;
+    drop(probe);
+
+    let out = std::env::temp_dir()
+        .join("fieldreplay_e16b_pause")
+        .join("pause.fcap");
+    let _ = std::fs::create_dir_all(out.parent().unwrap());
+    let _ = std::fs::remove_file(&out);
+
+    let start = format!(
+        r#"{{"id":"e16b-1","cmd":"record.start","type":"udp","name":"pause-udp","sessionTitle":"e16b","out":"{}","config":{{"bind_ip":"127.0.0.1","bind_port":{}}}}}"#,
+        escape_path_for_json(&out),
+        udp_addr.port()
+    );
+    write_text_frame_client(client, &start)?;
+    let started = drain_until_id(client, "e16b-1")?;
+    if !started.contains("\"ok\":true") || !started.contains("\"started\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("e16b record.start 失败: {started}"),
+        ));
+    }
+
+    thread::sleep(Duration::from_millis(80));
+    let sender = UdpSocket::bind("127.0.0.1:0")?;
+    sender.send_to(b"PRE1", udp_addr)?;
+    thread::sleep(Duration::from_millis(40));
+    sender.send_to(b"PRE2", udp_addr)?;
+    thread::sleep(Duration::from_millis(60));
+
+    write_text_frame_client(client, r#"{"id":"e16b-2","cmd":"record.pause"}"#)?;
+    let paused = drain_until_id(client, "e16b-2")?;
+    if !paused.contains("\"ok\":true") || !paused.contains("\"paused\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("record.pause 失败: {paused}"),
+        ));
+    }
+    // 幂等
+    write_text_frame_client(client, r#"{"id":"e16b-2b","cmd":"record.pause"}"#)?;
+    let paused2 = drain_until_id(client, "e16b-2b")?;
+    if !paused2.contains("\"already\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("record.pause 幂等应 already: {paused2}"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"e16b-st","cmd":"status"}"#)?;
+    let st = drain_until_id(client, "e16b-st")?;
+    if !st.contains("\"paused\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("暂停后 status 应含 paused:true: {st}"),
+        ));
+    }
+
+    // 暂停中丢弃收包；热插 marker 落冻结戳
+    sender.send_to(b"DROP", udp_addr)?;
+    thread::sleep(Duration::from_millis(30));
+    write_text_frame_client(
+        client,
+        r#"{"id":"e16b-mk","cmd":"session.addMarker","text":"pause-mark"}"#,
+    )?;
+    let mk = drain_until_id(client, "e16b-mk")?;
+    if !mk.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("暂停中 addMarker 失败: {mk}"),
+        ));
+    }
+
+    let pause_wall = Duration::from_millis(200);
+    thread::sleep(pause_wall);
+    sender.send_to(b"DROP2", udp_addr)?;
+    thread::sleep(Duration::from_millis(30));
+
+    write_text_frame_client(client, r#"{"id":"e16b-3","cmd":"record.resume"}"#)?;
+    let resumed = drain_until_id(client, "e16b-3")?;
+    if !resumed.contains("\"ok\":true") || !resumed.contains("\"paused\":false") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("record.resume 失败: {resumed}"),
+        ));
+    }
+
+    thread::sleep(Duration::from_millis(40));
+    sender.send_to(b"POST", udp_addr)?;
+    thread::sleep(Duration::from_millis(80));
+
+    // paused 下可 stop：再 pause 后直接 stop
+    write_text_frame_client(client, r#"{"id":"e16b-4","cmd":"record.pause"}"#)?;
+    let _ = drain_until_id(client, "e16b-4")?;
+    write_text_frame_client(client, r#"{"id":"e16b-5","cmd":"record.stop"}"#)?;
+    let stop_reply = drain_until_id(client, "e16b-5")?;
+    if !stop_reply.contains("\"ok\":true") || !stop_reply.contains("\"stopped\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("paused 下 record.stop 失败: {stop_reply}"),
+        ));
+    }
+
+    let mut reader = SessionReader::open(&out)?;
+    let packets = reader.read_all_packets()?;
+    let _ = std::fs::remove_file(&out);
+
+    let data: Vec<_> = packets
+        .iter()
+        .filter(|p| p.kind == PacketKind::Data)
+        .collect();
+    let payloads: Vec<&[u8]> = data.iter().map(|p| p.payload.as_slice()).collect();
+    if payloads.iter().any(|p| p.starts_with(b"DROP")) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("暂停期收包不应落盘: {payloads:?}"),
+        ));
+    }
+    if !payloads.iter().any(|p| *p == b"PRE1") || !payloads.iter().any(|p| *p == b"POST") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("应含暂停前后数据帧: {payloads:?}"),
+        ));
+    }
+
+    let marker = packets
+        .iter()
+        .find(|p| p.kind == PacketKind::Marker && p.aux.as_slice() == b"pause-mark")
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "缺暂停中写入的 marker")
+        })?;
+
+    let pre_last = data
+        .iter()
+        .filter(|p| p.payload.as_slice() == b"PRE2" || p.payload.as_slice() == b"PRE1")
+        .map(|p| p.relative_us)
+        .max()
+        .unwrap_or(0);
+    let post = data
+        .iter()
+        .find(|p| p.payload.as_slice() == b"POST")
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "缺 POST 帧"))?;
+
+    if marker.relative_us < pre_last.saturating_sub(5_000) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "暂停 marker 应落在冻结戳附近: mark={} pre_last={pre_last}",
+                marker.relative_us
+            ),
+        ));
+    }
+    if post.relative_us < marker.relative_us {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "恢复后相对戳应 ≥ marker: post={} mark={}",
+                post.relative_us, marker.relative_us
+            ),
+        ));
+    }
+    let gap = post.relative_us.saturating_sub(pre_last);
+    let pause_us = pause_wall.as_micros() as u64;
+    if gap >= pause_us {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "相对戳间隔应远小于暂停墙钟: gap={gap}us pause_wall={pause_us}us"
+            ),
+        ));
+    }
+
+    eprintln!("  控制面 record.pause/resume 相对戳冻结：通过");
     Ok(())
 }
 

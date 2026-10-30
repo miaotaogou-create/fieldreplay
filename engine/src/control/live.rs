@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::clock::SessionClock;
 use crate::fcap::{ChannelType, PacketRecord, SessionReader};
 use crate::mqtt::MqttConfig;
 use crate::multi_record::{
@@ -22,7 +23,7 @@ use super::json_util::{
     err_result, escape_str, extract_array, extract_object, extract_str, extract_u64, ok_result,
     split_json_array_elements,
 };
-use super::state::{ActiveRecording, LoadedSession};
+use super::state::{ActiveRecording, ControlState, LoadedSession};
 
 pub fn handle_record_start(
     id: &str,
@@ -115,6 +116,8 @@ fn start_multi_record(
     let stop = Arc::new(AtomicBool::new(false));
     let packet_count = Arc::new(AtomicU64::new(0));
     let live_sink: Arc<Mutex<Option<Arc<LiveRecordSink>>>> = Arc::new(Mutex::new(None));
+    let clock = SessionClock::start();
+    let clock_c = clock.clone();
     let hub_c = Arc::clone(hub);
     let stop_c = Arc::clone(&stop);
     let count_c = Arc::clone(&packet_count);
@@ -158,6 +161,7 @@ fn start_multi_record(
             &stop_c,
             Some(hook),
             Some(live_c),
+            Some(clock_c),
         );
         if let Err(ref e) = result {
             hub_c.broadcast(&format!(
@@ -175,6 +179,7 @@ fn start_multi_record(
         packet_count,
         join: Some(join),
         live_sink,
+        clock,
     });
 
     if let Some(channel_json) = single_channel_json {
@@ -250,6 +255,28 @@ fn parse_channel_job(elem: &str, index: usize) -> io::Result<ChannelJob> {
     }
 }
 
+pub fn handle_record_pause(id: &str, state: &mut ControlState) -> String {
+    state.reap_finished_replay();
+    let Some(active) = state.recording.as_ref() else {
+        return err_result(id, "当前未在录制，无法 pause");
+    };
+    if !active.clock.pause() {
+        return ok_result(id, "{\"paused\":true,\"already\":true}");
+    }
+    ok_result(id, "{\"paused\":true}")
+}
+
+pub fn handle_record_resume(id: &str, state: &mut ControlState) -> String {
+    state.reap_finished_replay();
+    let Some(active) = state.recording.as_ref() else {
+        return err_result(id, "当前未在录制，无法 resume");
+    };
+    if !active.clock.resume() {
+        return ok_result(id, "{\"paused\":false,\"already\":true}");
+    }
+    ok_result(id, "{\"paused\":false}")
+}
+
 pub fn handle_record_stop(
     id: &str,
     state_recording: &mut Option<ActiveRecording>,
@@ -258,6 +285,7 @@ pub fn handle_record_stop(
     let Some(mut active) = state_recording.take() else {
         return err_result(id, "当前未在录制");
     };
+    // paused 下也可 stop；保持冻结直至线程退出（排空仍不落盘）
     active.stop.store(true, Ordering::SeqCst);
     let join = active.join.take();
     let out = active.out_path.clone();

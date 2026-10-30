@@ -110,7 +110,7 @@ pub struct MultiRecordOptions {
     pub poll_timeout: Duration,
 }
 
-/// 多路录制共享写盘句柄；控制面可经此热插 `kind=marker`。
+/// 多路录制共享写盘句柄；控制面可经此热插 `kind=marker` / 暂停时钟。
 pub struct LiveRecordSink {
     writer: Arc<Mutex<SessionWriter>>,
     clock: SessionClock,
@@ -119,6 +119,10 @@ pub struct LiveRecordSink {
 }
 
 impl LiveRecordSink {
+    pub fn clock(&self) -> &SessionClock {
+        &self.clock
+    }
+
     fn append(&self, pkt: &PacketRecord) -> io::Result<()> {
         {
             let mut w = self
@@ -133,7 +137,16 @@ impl LiveRecordSink {
         Ok(())
     }
 
+    /// 暂停中排空收包：不打戳、不写盘、不推预览。
+    fn append_unless_paused(&self, pkt: &PacketRecord) -> io::Result<()> {
+        if self.clock.is_paused() {
+            return Ok(());
+        }
+        self.append(pkt)
+    }
+
     /// 按当前相对戳写入 marker（payload 空，aux=UTF-8 说明）。
+    /// 暂停中仍允许：落在冻结的 `relative_us`。
     pub fn append_marker(&self, text: &str, channel_index: u16) -> io::Result<PacketRecord> {
         if self.channel_count == 0 {
             return Err(io::Error::new(
@@ -166,12 +179,14 @@ impl LiveRecordSink {
 
 /// 多路并发录制到同一 `.fcap`。任一路启动期失败则停其余并返回 Err。
 /// `live_out` 非空时，写盘句柄就绪后写入供控制面热插 marker；结束时清空。
+/// `shared_clock` 非空时复用（控制面 pause/resume 与写盘同钟）；否则内部 `start()`。
 pub fn record_multi_to_file(
     opts: &MultiRecordOptions,
     jobs: &[ChannelJob],
     stop: &AtomicBool,
     hook: Option<PacketHook>,
     live_out: Option<Arc<Mutex<Option<Arc<LiveRecordSink>>>>>,
+    shared_clock: Option<SessionClock>,
 ) -> io::Result<u64> {
     if jobs.is_empty() {
         return Err(io::Error::new(
@@ -180,7 +195,7 @@ pub fn record_multi_to_file(
         ));
     }
 
-    let clock = SessionClock::start();
+    let clock = shared_clock.unwrap_or_else(SessionClock::start);
     let channels: Vec<ChannelEntry> = jobs
         .iter()
         .enumerate()
@@ -413,8 +428,11 @@ fn run_job(
                                 aux: b"rtsp".to_vec(),
                                 payload,
                             };
-                            sink.append(&pkt)?;
-                            count += 1;
+                            let was_paused = sink.clock.is_paused();
+                            sink.append_unless_paused(&pkt)?;
+                            if !was_paused {
+                                count += 1;
+                            }
                         }
                         None => continue,
                     }
@@ -463,8 +481,11 @@ fn run_job(
                             aux: Vec::new(),
                             payload: buf[..n].to_vec(),
                         };
-                        sink.append(&pkt)?;
-                        count += 1;
+                        let was_paused = sink.clock.is_paused();
+                        sink.append_unless_paused(&pkt)?;
+                        if !was_paused {
+                            count += 1;
+                        }
                     }
                     _ => continue,
                 }
@@ -496,17 +517,15 @@ fn run_job(
                     );
                     let stream = match accept_until(&listener, stop, poll_timeout)? {
                         Some((s, peer)) => {
-                            sink.append(
-                                &PacketRecord {
-                                    relative_us: sink.clock.relative_us(),
-                                    channel_index,
-                                    kind: PacketKind::TcpConnect,
-                                    direction: 0,
-                                    flags: 0,
-                                    aux: tcp_peer_aux(peer),
-                                    payload: Vec::new(),
-                                }
-                            )?;
+                            sink.append_unless_paused(&PacketRecord {
+                                relative_us: sink.clock.relative_us(),
+                                channel_index,
+                                kind: PacketKind::TcpConnect,
+                                direction: 0,
+                                flags: 0,
+                                aux: tcp_peer_aux(peer),
+                                payload: Vec::new(),
+                            })?;
                             s
                         }
                         None => return Ok(0),
@@ -534,17 +553,15 @@ fn run_job(
                         "录制中（多路 TCP client）：{name} {}:{}",
                         config.host, config.port
                     );
-                    sink.append(
-                        &PacketRecord {
-                            relative_us: sink.clock.relative_us(),
-                            channel_index,
-                            kind: PacketKind::TcpConnect,
-                            direction: 1,
-                            flags: 0,
-                            aux: tcp_peer_aux(peer),
-                            payload: Vec::new(),
-                        }
-                    )?;
+                    sink.append_unless_paused(&PacketRecord {
+                        relative_us: sink.clock.relative_us(),
+                        channel_index,
+                        kind: PacketKind::TcpConnect,
+                        direction: 1,
+                        flags: 0,
+                        aux: tcp_peer_aux(peer),
+                        payload: Vec::new(),
+                    })?;
                     run_tcp_data_loop(sink, channel_index, stream, stop, max_duration)
                 }
             }
@@ -584,8 +601,11 @@ fn run_job(
                             aux: msg.topic.into_bytes(),
                             payload: msg.payload,
                         };
-                        sink.append(&pkt)?;
-                        count += 1;
+                        let was_paused = sink.clock.is_paused();
+                        sink.append_unless_paused(&pkt)?;
+                        if !was_paused {
+                            count += 1;
+                        }
                     }
                     None => continue,
                 }
@@ -622,8 +642,11 @@ fn run_datagram_loop(
                     aux: peer_aux(peer),
                     payload: buf[..n].to_vec(),
                 };
-                sink.append(&pkt)?;
-                count += 1;
+                let was_paused = sink.clock.is_paused();
+                sink.append_unless_paused(&pkt)?;
+                if !was_paused {
+                    count += 1;
+                }
             }
             None => continue,
         }
@@ -649,50 +672,53 @@ fn run_tcp_data_loop(
         }
         match read_some(&stream, &mut buf)? {
             ReadOutcome::Data(n) => {
-                sink.append(
-                    &PacketRecord {
-                        relative_us: sink.clock.relative_us(),
-                        channel_index,
-                        kind: PacketKind::Data,
-                        direction: 0,
-                        flags: 0,
-                        aux: Vec::new(),
-                        payload: buf[..n].to_vec(),
-                    }
-                )?;
-                count += 1;
+                let was_paused = sink.clock.is_paused();
+                sink.append_unless_paused(&PacketRecord {
+                    relative_us: sink.clock.relative_us(),
+                    channel_index,
+                    kind: PacketKind::Data,
+                    direction: 0,
+                    flags: 0,
+                    aux: Vec::new(),
+                    payload: buf[..n].to_vec(),
+                })?;
+                if !was_paused {
+                    count += 1;
+                }
             }
             ReadOutcome::Timeout => continue,
             ReadOutcome::Eof => {
                 eof = true;
-                sink.append(
-                    &PacketRecord {
-                        relative_us: sink.clock.relative_us(),
-                        channel_index,
-                        kind: PacketKind::TcpDisconnect,
-                        direction: 0,
-                        flags: 0,
-                        aux: b"eof".to_vec(),
-                        payload: Vec::new(),
-                    }
-                )?;
-                count += 1;
+                let was_paused = sink.clock.is_paused();
+                sink.append_unless_paused(&PacketRecord {
+                    relative_us: sink.clock.relative_us(),
+                    channel_index,
+                    kind: PacketKind::TcpDisconnect,
+                    direction: 0,
+                    flags: 0,
+                    aux: b"eof".to_vec(),
+                    payload: Vec::new(),
+                })?;
+                if !was_paused {
+                    count += 1;
+                }
             }
         }
     }
     if !eof {
-        sink.append(
-            &PacketRecord {
-                relative_us: sink.clock.relative_us(),
-                channel_index,
-                kind: PacketKind::TcpDisconnect,
-                direction: 1,
-                flags: 0,
-                aux: b"stop".to_vec(),
-                payload: Vec::new(),
-            }
-        )?;
-        count += 1;
+        let was_paused = sink.clock.is_paused();
+        sink.append_unless_paused(&PacketRecord {
+            relative_us: sink.clock.relative_us(),
+            channel_index,
+            kind: PacketKind::TcpDisconnect,
+            direction: 1,
+            flags: 0,
+            aux: b"stop".to_vec(),
+            payload: Vec::new(),
+        })?;
+        if !was_paused {
+            count += 1;
+        }
         drop(stream);
     }
     Ok(count)
@@ -754,6 +780,7 @@ pub fn self_check_multi_udp() -> io::Result<()> {
                 },
             ],
             &stop_c,
+            None,
             None,
             None,
         )
