@@ -15,11 +15,11 @@ use fieldreplay_engine::{
     record_mqtt_to_file, record_serial_with_port, record_tcp_to_file, record_udp_to_file,
     record_video_to_file, record_video_to_file_with, replay_mqtt_from_file,
     replay_serial_with_port, replay_tcp_from_file, replay_udp_from_file, replay_video_from_file,
-    replay_video_rtsp_from_file, run_io_acceptance, serve_control, MiniBroker, MiniRtspServer,
-    MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
-    RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort,
-    SerialRecordOptions, SerialReplayOptions, TcpConfig, TcpRecordOptions, TcpReplayOptions,
-    TcpRole, DEFAULT_BIND,
+    replay_video_rtsp_from_file, run_io_acceptance, serial_pair_from_env, serve_control,
+    MiniBroker, MiniRtspServer, MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions,
+    Parity, FaultInjection, RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl,
+    SerialConfig, SerialPort, SerialRecordOptions, SerialReplayOptions, TcpConfig,
+    TcpRecordOptions, TcpReplayOptions, TcpRole, DEFAULT_BIND, SERIAL_PAIR_ENV,
 };
 
 fn main() {
@@ -658,6 +658,20 @@ fn cmd_self_check() -> io::Result<()> {
     serial_loopback_check()?;
     println!("ok");
 
+    match serial_pair_from_env()? {
+        Some((port_a, port_b)) => {
+            print!("self-check: 串口实口对 {port_a}↔{port_b} 录放… ");
+            let _ = io::stdout().flush();
+            serial_hw_pair_check(&port_a, &port_b)?;
+            println!("ok");
+        }
+        None => {
+            println!(
+                "self-check: 串口实口对（跳过：未设 {SERIAL_PAIR_ENV}=COMa,COMb）"
+            );
+        }
+    }
+
     print!("self-check: TCP server 录 / client 放… ");
     let _ = io::stdout().flush();
     tcp_server_record_loopback()?;
@@ -1203,6 +1217,114 @@ fn serial_loopback_check() -> io::Result<()> {
         return Err(io::Error::new(
             io::ErrorKind::Other,
             format!("串口载荷不一致: {got:?}"),
+        ));
+    }
+    Ok(())
+}
+
+/// 实口/虚口对：`port_a` 录+重放写出，`port_b` 灌数+监听（如 com0com 一对）。
+/// 由 `FIELDREPLAY_SERIAL_PAIR` 门控；口不存在或占用时返回 Err（有意失败，勿在无口 CI 上设置）。
+fn serial_hw_pair_check(port_a: &str, port_b: &str) -> io::Result<()> {
+    use std::thread;
+
+    const BAUD: u32 = 115_200;
+    let fcap = std::env::temp_dir().join(format!(
+        "fieldreplay_serial_hw_{}.fcap",
+        std::process::id()
+    ));
+    let fcap2 = fcap.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_rec = Arc::clone(&stop);
+
+    let cfg_a = SerialConfig::new(port_a, BAUD);
+    let end_rec = SerialPort::open(&cfg_a, Duration::from_millis(50)).map_err(|e| {
+        io::Error::new(
+            e.kind(),
+            format!("打开录制口 {port_a} 失败: {e}"),
+        )
+    })?;
+    let end_inj = SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(50))
+        .map_err(|e| {
+            io::Error::new(e.kind(), format!("打开灌数口 {port_b} 失败: {e}"))
+        })?;
+
+    let recorder = thread::spawn(move || {
+        let opts = SerialRecordOptions {
+            config: cfg_a,
+            out_path: fcap2,
+            channel_name: "SERIAL-hw".into(),
+            session_title: Some("serial-hw-pair".into()),
+            max_duration: Some(Duration::from_secs(3)),
+            poll_timeout: Duration::from_millis(50),
+        };
+        record_serial_with_port(&opts, &stop_rec, &end_rec)
+    });
+
+    thread::sleep(Duration::from_millis(120));
+    end_inj.write_all(b"hw-ping-1")?;
+    thread::sleep(Duration::from_millis(60));
+    end_inj.write_all(b"hw-ping-2")?;
+    thread::sleep(Duration::from_millis(150));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = recorder.join().map_err(|_| err_arg("实口串口录制线程 panic"))??;
+    drop(end_inj);
+    if n < 2 {
+        let _ = std::fs::remove_file(&fcap);
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("实口串口录制帧数不足: {n}（确认 {port_a}↔{port_b} 为交叉对）"),
+        ));
+    }
+
+    let end_play = SerialPort::open(&SerialConfig::new(port_a, BAUD), Duration::from_millis(200))
+        .map_err(|e| {
+            io::Error::new(e.kind(), format!("打开重放口 {port_a} 失败: {e}"))
+        })?;
+    let end_listen =
+        SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(200)).map_err(
+            |e| io::Error::new(e.kind(), format!("打开监听口 {port_b} 失败: {e}")),
+        )?;
+
+    let listener = thread::spawn(move || -> io::Result<Vec<Vec<u8>>> {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 2048];
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while out.len() < 2 && Instant::now() < deadline {
+            if let Some(n) = end_listen.read(&mut buf)? {
+                if n > 0 {
+                    out.push(buf[..n].to_vec());
+                }
+            }
+        }
+        Ok(out)
+    });
+
+    let sent = replay_serial_with_port(
+        &SerialReplayOptions {
+            in_path: fcap.clone(),
+            config: SerialConfig::new(port_a, BAUD),
+            speed: 1.0,
+            fault: FaultInjection::OFF,
+            looping: false,
+        },
+        &end_play,
+    )?;
+    let got = listener
+        .join()
+        .map_err(|_| err_arg("实口串口接收线程 panic"))??;
+    let _ = std::fs::remove_file(&fcap);
+
+    if sent < 2 || got.len() < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("实口串口重放不足: sent={sent} got={}", got.len()),
+        ));
+    }
+    if got[0] != b"hw-ping-1" || got[1] != b"hw-ping-2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("实口串口载荷不一致: {got:?}"),
         ));
     }
     Ok(())

@@ -77,7 +77,7 @@
 | `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
 | `replay.start` | 对已载入会话按时间轴重放：`type` + `config`（UDP `target_ip`/`target_port`；视频同 UDP，或 `mode=rtsp_listen`+`listen_port` 作 RTSP 服务端；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`，角色由文件取反；MQTT `broker`/`port` + 可选 `topicPrefix`）；`video`\|`video_stream` 只匹配会话内 `video` 通道。可选 `speed` / `loop` / `fault`（同前）。同时刻一路，与录制互斥。推送 `replay.progress` 与 `replay.done` |
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位（`loop:true` 时仅 stop/出错才 done） |
-| `serial.list` | E8a：枚举本机串口名（Windows COM）；响应 `{ "ports": ["COM3", ...] }`；无口为空数组 |
+| `serial.list` | E8a：枚举本机串口名（Windows COM）；响应 `{ "ports": ["COM3", ...] }`；无口为空数组。E8b：可选自检 `FIELDREPLAY_SERIAL_PAIR=COMa,COMb`（未设则跳过） |
 
 UI：引擎已连接时导出走 `session.export` 下真实二进制；未连接时仍可下载 JSON 离线演示包。**倍速 / 暂停 / seek / 故障注入 / 循环已接通**（`replay.start.speed`、`pause`/`resume`、`seek`/`fromUs`、`fault`、`loop`）。
 

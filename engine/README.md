@@ -58,7 +58,7 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
 | `clock` | 录制相对微秒、重放等待 |
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
-| `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；自检内存环回 |
+| `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
 | `tcp` | 角色 server/client；连接事件 + 字节流 |
 | `mqtt` | 最小 MQTT 3.1.1 客户端；自检迷你 Broker |
 | `record` / `replay` | UDP / 串口 / TCP / MQTT 会话闭环 |
@@ -71,8 +71,12 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix
 ```bat
 cargo test
 cargo run -- self-check
+
+REM 可选：虚口/实口对（如 com0com 的 COM3↔COM4）；未设置则跳过，不导致无 COM 的 CI 失败
+set FIELDREPLAY_SERIAL_PAIR=COM3,COM4
+cargo run -- self-check
 ```
 
-实口手测需本机串口或虚拟串口对（如 com0com）：一端录、一端灌数据；重放写到对端口。  
+实口/虚口手测步骤见 [`../docs/requirements/20261030-serial-enhance.md`](../docs/requirements/20261030-serial-enhance.md)（一端灌、一端录；重放写对端口）。  
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
 MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。账号密码 / TLS 未进 E4（见需求待确认项）。

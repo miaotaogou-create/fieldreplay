@@ -5,6 +5,45 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// 可选实口/虚口对自检：`FIELDREPLAY_SERIAL_PAIR=COMa,COMb`（未设置则跳过，不导致 CI 失败）。
+pub const SERIAL_PAIR_ENV: &str = "FIELDREPLAY_SERIAL_PAIR";
+
+/// 解析 `COMa,COMb`；两端须非空且不同。
+pub fn parse_serial_pair(spec: &str) -> io::Result<(String, String)> {
+    let parts: Vec<&str> = spec
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.len() != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{SERIAL_PAIR_ENV} 应为 COMa,COMb（两个不同口名），当前: {spec:?}"
+            ),
+        ));
+    }
+    if parts[0].eq_ignore_ascii_case(parts[1]) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{SERIAL_PAIR_ENV} 两端口名不能相同: {}", parts[0]),
+        ));
+    }
+    Ok((parts[0].to_string(), parts[1].to_string()))
+}
+
+/// 读取环境变量；未设置或空串 → `Ok(None)`（自检跳过实口对）。
+pub fn serial_pair_from_env() -> io::Result<Option<(String, String)>> {
+    match std::env::var(SERIAL_PAIR_ENV) {
+        Ok(s) if !s.trim().is_empty() => parse_serial_pair(&s).map(Some),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{SERIAL_PAIR_ENV} 含非 Unicode"),
+        )),
+    }
+}
+
 /// 校验位（写入 `.fcap` config_json 的 `parity`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parity {
@@ -545,5 +584,20 @@ mod tests {
                 "意外端口名: {p}"
             );
         }
+    }
+
+    #[test]
+    fn parse_serial_pair_ok() {
+        let (a, b) = parse_serial_pair(" COM3 , COM4 ").unwrap();
+        assert_eq!(a, "COM3");
+        assert_eq!(b, "COM4");
+    }
+
+    #[test]
+    fn parse_serial_pair_rejects_same_or_bad() {
+        assert!(parse_serial_pair("COM3").is_err());
+        assert!(parse_serial_pair("COM3,COM3").is_err());
+        assert!(parse_serial_pair("COM3, COM3 ").is_err());
+        assert!(parse_serial_pair("").is_err());
     }
 }
