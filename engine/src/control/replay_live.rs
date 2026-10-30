@@ -8,7 +8,11 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::fcap::ChannelType;
 use crate::mqtt::MqttConfig;
+use crate::multi_replay::{
+    open_datagram_target, replay_multi_datagram_from_file_with, DatagramTarget, MultiReplayOptions,
+};
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
     replay_udp_from_file_with, replay_video_from_file_with, replay_video_rtsp_from_file_with,
@@ -17,12 +21,13 @@ use crate::replay::{
 };
 use crate::serial::{Parity, SerialConfig, SerialPort};
 
+use super::dto::channel_type_str;
 use super::hub::PushHub;
 use crate::clock::SessionClock;
 
 use super::json_util::{
-    err_result, escape_str, extract_bool, extract_f64, extract_object, extract_str, extract_u64,
-    ok_result,
+    err_result, escape_str, extract_array, extract_bool, extract_f64, extract_object, extract_str,
+    extract_u64, ok_result, split_json_array_elements,
 };
 use super::session_file::write_loaded_session;
 use super::state::{ActiveReplay, ControlState, LoadedSession};
@@ -47,11 +52,6 @@ pub fn handle_replay_start(
         return err_result(id, "会话无帧，无法重放");
     }
 
-    let ty = match extract_str(msg, "type") {
-        Some(t) => t.to_ascii_lowercase(),
-        None => return err_result(id, "replay.start 需要 type"),
-    };
-    let config_raw = extract_object(msg, "config").unwrap_or_else(|| "{}".into());
     let topic_prefix = extract_str(msg, "topicPrefix")
         .or_else(|| extract_str(msg, "topic_prefix"))
         .unwrap_or_default();
@@ -61,6 +61,29 @@ pub fn handle_replay_start(
         .unwrap_or(0);
     let looping = extract_bool(msg, "loop").unwrap_or(false);
     let fault = parse_fault(msg);
+
+    // E11c：非空 targets[] 优先；否则走旧单路 type+config
+    if let Some(arr) = extract_array(msg, "targets") {
+        let elems = split_json_array_elements(&arr);
+        if !elems.is_empty() {
+            return start_multi_replay(
+                id,
+                &elems,
+                speed,
+                from_us,
+                looping,
+                fault,
+                state,
+                hub,
+            );
+        }
+    }
+
+    let ty = match extract_str(msg, "type") {
+        Some(t) => t.to_ascii_lowercase(),
+        None => return err_result(id, "replay.start 需要 type 或非空 targets"),
+    };
+    let config_raw = extract_object(msg, "config").unwrap_or_else(|| "{}".into());
 
     let (in_path, duration_us) = {
         let session = state.session.as_ref().unwrap();
@@ -150,6 +173,221 @@ pub fn handle_replay_start(
             } else {
                 config_raw.as_str()
             },
+            if looping { "true" } else { "false" },
+            if fault.enabled { "true" } else { "false" },
+            fault.loss_rate_percent,
+            if fault.corrupt_payload {
+                "true"
+            } else {
+                "false"
+            }
+        ),
+    )
+}
+
+fn start_multi_replay(
+    id: &str,
+    elems: &[String],
+    speed: f64,
+    from_us: u64,
+    looping: bool,
+    fault: FaultInjection,
+    state: &mut ControlState,
+    hub: &Arc<PushHub>,
+) -> String {
+    let session = state.session.as_ref().unwrap();
+    let mut bound: Vec<(u16, String, String, ChannelType, SocketAddr)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut targets_json = String::from("[");
+
+    for (i, elem) in elems.iter().enumerate() {
+        let ty_s = match extract_str(elem, "type") {
+            Some(t) => t.to_ascii_lowercase(),
+            None => return err_result(id, &format!("targets[{i}] 缺 type")),
+        };
+        let ch = extract_u64(elem, "ch")
+            .or_else(|| extract_u64(elem, "channel"))
+            .or_else(|| extract_u64(elem, "channelIndex"))
+            .unwrap_or(i as u64);
+        if ch > u16::MAX as u64 {
+            return err_result(id, &format!("targets[{i}] ch 超出范围"));
+        }
+        let ch = ch as u16;
+        if !seen.insert(ch) {
+            return err_result(id, &format!("targets 中通道 {ch} 重复"));
+        }
+        let Some(entry) = session.channels.iter().find(|c| c.channel_index == ch) else {
+            return err_result(id, &format!("targets[{i}] 会话无通道 {ch}"));
+        };
+        let expect = match ty_s.as_str() {
+            "udp" => ChannelType::Udp,
+            "video" | "video_stream" => ChannelType::Video,
+            "serial" | "tcp" | "mqtt" => {
+                return err_result(
+                    id,
+                    &format!(
+                        "targets[{i}] 多路对齐重放本阶段仅支持 udp / video（UDP 推送），不支持 {ty_s}"
+                    ),
+                );
+            }
+            other => {
+                return err_result(id, &format!("targets[{i}] 不支持的类型: {other}"));
+            }
+        };
+        if entry.channel_type != expect {
+            return err_result(
+                id,
+                &format!(
+                    "targets[{i}] 通道 {ch} 类型不匹配：会话 {}，目标 {ty_s}",
+                    channel_type_str(entry.channel_type)
+                ),
+            );
+        }
+        let config_raw = extract_object(elem, "config").unwrap_or_else(|| "{}".into());
+        // 多路视频暂不支持 RTSP listen（会阻塞整会话时间轴）
+        if expect == ChannelType::Video {
+            if let Ok(Some(_)) = parse_rtsp_listen(&config_raw) {
+                return err_result(
+                    id,
+                    &format!("targets[{i}] 多路对齐重放暂不支持 RTSP 服务端，请用 UDP 推送"),
+                );
+            }
+        }
+        let addr = match parse_udp_target(&config_raw) {
+            Ok(a) => a,
+            Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
+        };
+        if !targets_json.ends_with('[') {
+            targets_json.push(',');
+        }
+        targets_json.push_str(&format!(
+            "{{\"ch\":{ch},\"type\":\"{}\",\"config\":{}}}",
+            escape_str(&ty_s),
+            if config_raw.trim().is_empty() {
+                "{}"
+            } else {
+                config_raw.as_str()
+            }
+        ));
+        bound.push((ch, ty_s, config_raw, expect, addr));
+    }
+    targets_json.push(']');
+
+    let mut skipped_json = String::from("[");
+    let mut skipped_n = 0usize;
+    for entry in &session.channels {
+        if seen.contains(&entry.channel_index) {
+            continue;
+        }
+        if skipped_n > 0 {
+            skipped_json.push(',');
+        }
+        skipped_json.push_str(&format!(
+            "{{\"ch\":{},\"type\":\"{}\",\"name\":\"{}\"}}",
+            entry.channel_index,
+            channel_type_str(entry.channel_type),
+            escape_str(&entry.name)
+        ));
+        skipped_n += 1;
+    }
+    skipped_json.push(']');
+
+    if bound.is_empty() {
+        return err_result(id, "没有可绑定的重放目标");
+    }
+
+    let in_path = match materialize_session(session) {
+        Ok(p) => p,
+        Err(e) => return err_result(id, &format!("无法准备会话文件: {e}")),
+    };
+    let duration_us = session.duration_us.max(
+        session
+            .packets
+            .last()
+            .map(|p| p.relative_us)
+            .unwrap_or(0),
+    );
+
+    let mut datagrams: Vec<DatagramTarget> = Vec::with_capacity(bound.len());
+    for (ch, _ty, _cfg, expect, addr) in &bound {
+        match open_datagram_target(*ch, *expect, *addr, "0.0.0.0:0".parse().unwrap()) {
+            Ok(t) => datagrams.push(t),
+            Err(e) => {
+                return err_result(id, &format!("打开目标通道 {ch} 失败: {e}"));
+            }
+        }
+    }
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
+    let seek_us = Arc::new(AtomicU64::new(SessionClock::NO_SEEK));
+    let finished = Arc::new(AtomicBool::new(false));
+    let sent_count = Arc::new(AtomicU64::new(0));
+    let hub_c = Arc::clone(hub);
+    let stop_c = Arc::clone(&stop);
+    let paused_c = Arc::clone(&paused);
+    let seek_c = Arc::clone(&seek_us);
+    let finished_c = Arc::clone(&finished);
+    let sent_c = Arc::clone(&sent_count);
+    let path_c = in_path;
+
+    let join = thread::spawn(move || {
+        let hub = Arc::clone(&hub_c);
+        let count = Arc::clone(&sent_c);
+        let mut hook = move |sent: u64, relative_us: u64| {
+            count.store(sent, Ordering::SeqCst);
+            hub.broadcast(&format!(
+                "{{\"event\":\"replay.progress\",\"sent\":{sent},\"relativeUs\":{relative_us},\"durationUs\":{duration_us}}}"
+            ));
+        };
+        let mut on: OnReplayProgress<'_> = Some(&mut hook);
+        let result = replay_multi_datagram_from_file_with(
+            &MultiReplayOptions {
+                in_path: path_c,
+                speed,
+                fault,
+                looping,
+            },
+            &datagrams,
+            &stop_c,
+            &paused_c,
+            &seek_c,
+            from_us,
+            &mut on,
+        );
+        let sent = sent_c.load(Ordering::SeqCst);
+        let stopped = stop_c.load(Ordering::SeqCst);
+        let done = match &result {
+            Ok(_) => format!(
+                "{{\"event\":\"replay.done\",\"sent\":{sent},\"stopped\":{}}}",
+                if stopped { "true" } else { "false" }
+            ),
+            Err(e) => format!(
+                "{{\"event\":\"replay.done\",\"sent\":{sent},\"stopped\":{},\"error\":\"{}\"}}",
+                if stopped { "true" } else { "false" },
+                escape_str(&e.to_string())
+            ),
+        };
+        hub_c.broadcast(&done);
+        finished_c.store(true, Ordering::SeqCst);
+        result
+    });
+
+    state.replaying = Some(ActiveReplay {
+        stop,
+        paused,
+        seek_us,
+        finished,
+        channel_type: "multi".into(),
+        sent_count,
+        duration_us,
+        join: Some(join),
+    });
+
+    ok_result(
+        id,
+        &format!(
+            "{{\"started\":true,\"targets\":{targets_json},\"skipped\":{skipped_json},\"durationUs\":{duration_us},\"speed\":{speed},\"fromUs\":{from_us},\"loop\":{},\"fault\":{{\"enabled\":{},\"lossRatePercent\":{},\"corruptCrc\":{}}}}}",
             if looping { "true" } else { "false" },
             if fault.enabled { "true" } else { "false" },
             fault.loss_rate_percent,

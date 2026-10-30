@@ -6,6 +6,7 @@ pub mod fcap;
 pub mod io_accept;
 pub mod mqtt;
 pub mod multi_record;
+pub mod multi_replay;
 pub mod pcap;
 pub mod record;
 pub mod replay;
@@ -27,6 +28,10 @@ pub use mqtt::{
 };
 pub use multi_record::{
     record_multi_to_file, self_check_multi_udp, ChannelJob, MultiRecordOptions, PacketHook,
+};
+pub use multi_replay::{
+    open_datagram_target, replay_multi_datagram_from_file_with, self_check_multi_udp_replay,
+    DatagramTarget, MultiReplayOptions,
 };
 pub use pcap::{
     self_check_pcap_export, session_to_pcap_bytes, write_session_pcap, PcapExportStats,

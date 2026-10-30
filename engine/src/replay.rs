@@ -117,7 +117,7 @@ pub fn apply_fault<'a>(
     Some(Cow::Borrowed(payload))
 }
 
-fn emit_with_fault(
+pub(crate) fn emit_with_fault(
     payload: &[u8],
     fault: &FaultInjection,
     rng: &mut FaultRng,
@@ -523,7 +523,7 @@ fn replay_datagram_from_file_with(
 }
 
 /// 消费一次挂起的 seek：回卷读头并校准时钟；无挂起则 `None`。
-fn take_pending_seek(
+pub(crate) fn take_pending_seek(
     seek_us: &AtomicU64,
     reader: &mut SessionReader,
     base: &mut Instant,
@@ -539,7 +539,7 @@ fn take_pending_seek(
 }
 
 /// EOF 时若开启循环且本遍匹配过通道帧：回卷到 0 再放；返回 true 表示已重启。
-fn try_restart_loop(
+pub(crate) fn try_restart_loop(
     looping: bool,
     stop: &AtomicBool,
     pass_matched: u64,
