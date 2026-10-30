@@ -43,6 +43,10 @@ fn run() -> io::Result<()> {
         "import-pcap" => cmd_import_pcap(args),
         "serve" => cmd_serve(args),
         "self-check" => cmd_self_check(),
+        // E2E Lab 夹具：迷你 Broker / 周期发布 / 订阅验收（非产品主路径）
+        "lab-mqtt-broker" => cmd_lab_mqtt_broker(args),
+        "lab-mqtt-pub" => cmd_lab_mqtt_pub(args),
+        "lab-mqtt-sub" => cmd_lab_mqtt_sub(args),
         "help" | "-h" | "--help" => {
             print_help();
             Ok(())
@@ -82,8 +86,13 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine import-pcap --in <file.pcap> --out <file.fcap>
   fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
+  fieldreplay-engine lab-mqtt-broker [--bind 127.0.0.1:1883]
+  fieldreplay-engine lab-mqtt-pub  [--mqtt 127.0.0.1:1883] [--topic e2e/sensor] \\
+                                   [--interval-ms 200] [--count <n>]
+  fieldreplay-engine lab-mqtt-sub  [--mqtt 127.0.0.1:1883] [--topic e2e/#] [--seconds 8]
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
+lab-mqtt-*：E2E Lab 本机假 Broker/发布/订阅；关掉窗口即停。
 --bind / --port / --tcp / --mqtt / --rtsp 互斥；replay 的 --target / --rtsp-listen / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
 MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）；可选 --mqtt-user/--mqtt-password（E9a）；
@@ -94,6 +103,158 @@ import-pcap：将经典以太网 .pcap（IPv4 UDP/TCP 有载荷）导入为 .fca
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
     );
+}
+
+/// E2E-4：本机迷你 Broker（明文，无鉴权）。
+fn cmd_lab_mqtt_broker(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut bind = "127.0.0.1:1883".to_string();
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--bind" => {
+                bind = args
+                    .next()
+                    .ok_or_else(|| err_arg("--bind 需要地址"))?;
+            }
+            other => {
+                return Err(err_arg(&format!("lab-mqtt-broker 未知参数: {other}")));
+            }
+        }
+    }
+    let addr: SocketAddr = bind
+        .parse()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, format!("--bind 无效: {e}")))?;
+    let broker = MiniBroker::start_on(addr)?;
+    println!(
+        "[E2E-4] MQTT mini-broker listening on {} (Ctrl+C stop)",
+        broker.addr()
+    );
+    loop {
+        std::thread::sleep(Duration::from_secs(3600));
+    }
+}
+
+/// E2E-4：假设备周期发布可读 SENSOR 行。
+fn cmd_lab_mqtt_pub(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut mqtt = "127.0.0.1:1883".to_string();
+    let mut topic = "e2e/sensor".to_string();
+    let mut interval_ms: u64 = 200;
+    let mut count: u64 = 0;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--mqtt" => {
+                mqtt = args.next().ok_or_else(|| err_arg("--mqtt 需要 host:port"))?;
+            }
+            "--topic" => {
+                topic = args.next().ok_or_else(|| err_arg("--topic 需要主题"))?;
+            }
+            "--interval-ms" => {
+                interval_ms = args
+                    .next()
+                    .ok_or_else(|| err_arg("--interval-ms 需要毫秒"))?
+                    .parse()
+                    .map_err(|_| err_arg("--interval-ms 无效"))?;
+            }
+            "--count" => {
+                count = args
+                    .next()
+                    .ok_or_else(|| err_arg("--count 需要次数"))?
+                    .parse()
+                    .map_err(|_| err_arg("--count 无效"))?;
+            }
+            other => {
+                return Err(err_arg(&format!("lab-mqtt-pub 未知参数: {other}")));
+            }
+        }
+    }
+    let (host, port) = split_host_port(&mqtt)?;
+    let cfg = MqttConfig::new(host, port, &topic, 0);
+    let mut client = MqttClient::connect(&cfg, Duration::from_millis(500))?;
+    println!(
+        "[E2E-4] MQTT pub -> {mqtt} topic={topic} every {interval_ms}ms (Ctrl+C stop)"
+    );
+    let mut n: u64 = 0;
+    loop {
+        n += 1;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let line = format!("SENSOR,seq={n},ts_ms={ts},temp={},ok=1", 20 + (n % 15));
+        client.publish(&topic, line.as_bytes(), 0, false)?;
+        if n % 10 == 0 {
+            println!("sent {n} : {line}");
+        }
+        if count > 0 && n >= count {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(interval_ms.max(1)));
+    }
+    let _ = client.disconnect();
+    println!("[E2E-4] stopped after {n} publishes");
+    Ok(())
+}
+
+/// E2E-4：本机订阅验收（FieldReplay 录制前的嗅探替身）。
+fn cmd_lab_mqtt_sub(mut args: impl Iterator<Item = String>) -> io::Result<()> {
+    let mut mqtt = "127.0.0.1:1883".to_string();
+    let mut topic = "e2e/#".to_string();
+    let mut seconds: u64 = 8;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--mqtt" => {
+                mqtt = args.next().ok_or_else(|| err_arg("--mqtt 需要 host:port"))?;
+            }
+            "--topic" => {
+                topic = args.next().ok_or_else(|| err_arg("--topic 需要过滤器"))?;
+            }
+            "--seconds" => {
+                seconds = args
+                    .next()
+                    .ok_or_else(|| err_arg("--seconds 需要秒数"))?
+                    .parse()
+                    .map_err(|_| err_arg("--seconds 无效"))?;
+            }
+            other => {
+                return Err(err_arg(&format!("lab-mqtt-sub 未知参数: {other}")));
+            }
+        }
+    }
+    let (host, port) = split_host_port(&mqtt)?;
+    let cfg = MqttConfig::new(host, port, &topic, 0);
+    let mut client = MqttClient::connect(&cfg, Duration::from_millis(500))?;
+    client.subscribe(&topic, 0)?;
+    println!("[E2E-4] MQTT sub {mqtt} filter={topic} for {seconds}s");
+    let stop = AtomicBool::new(false);
+    let deadline = Instant::now() + Duration::from_secs(seconds.max(1));
+    let mut got: u64 = 0;
+    while Instant::now() < deadline {
+        match client.poll_publish(&stop)? {
+            Some(msg) => {
+                got += 1;
+                let text = String::from_utf8_lossy(&msg.payload);
+                println!("recv #{got} topic={} : {text}", msg.topic);
+            }
+            None => {}
+        }
+    }
+    let _ = client.disconnect();
+    println!("[E2E-4] done, messages={got}");
+    if got < 3 {
+        eprintln!("FAIL: expected at least 3 SENSOR messages");
+        std::process::exit(1);
+    }
+    println!("PASS");
+    Ok(())
+}
+
+fn split_host_port(s: &str) -> io::Result<(String, u16)> {
+    let (host, port_s) = s.rsplit_once(':').ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "需要 host:port 形式")
+    })?;
+    let port: u16 = port_s
+        .parse()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "端口无效"))?;
+    Ok((host.to_string(), port))
 }
 
 fn cmd_import_pcap(mut args: impl Iterator<Item = String>) -> io::Result<()> {

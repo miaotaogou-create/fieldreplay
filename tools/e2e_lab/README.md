@@ -32,3 +32,16 @@ RTSP windows from E2E-1 can stay open; not required for this step.
 
 Port `57002` (not `56xxx`): Hyper-V often reserves `56xxx` for TCP listen.
 UDP E2E-2 can stay open (`56001`).
+
+## E2E-4: MQTT Broker + publish
+
+Needs built engine (`engine/target/release` or `debug` `fieldreplay-engine.exe`).
+
+**Order:** broker first, then subscribe window, then publisher (or pub before sub — both ok after broker).
+
+1. Run `04_start_mqtt_broker.bat` (keep open) — listens `127.0.0.1:1883`
+2. Run `04_start_mqtt_pub.bat` (keep open) — publishes `SENSOR,...` on `e2e/sensor`
+3. Run `04_run_mqtt_sub.bat` — should print several `recv #n ... SENSOR,...` and `PASS`
+4. Tell the guide "MQTT OK" when PASS
+
+Uses engine mini-broker (no Mosquitto install). Plain MQTT, no TLS/auth (E15 later).

@@ -45,25 +45,31 @@ pub struct MiniBroker {
 
 impl MiniBroker {
     pub fn start() -> io::Result<Self> {
-        Self::start_inner(None, None)
+        Self::start_on("127.0.0.1:0".parse().unwrap())
+    }
+
+    /// 绑定指定地址（E2E Lab：固定 `127.0.0.1:1883`）。
+    pub fn start_on(bind: SocketAddr) -> io::Result<Self> {
+        Self::start_inner(bind, None, None)
     }
 
     /// E9a 自检：要求 CONNECT 带匹配的 username/password。
     pub fn start_with_auth(auth: Option<(String, String)>) -> io::Result<Self> {
-        Self::start_inner(auth, None)
+        Self::start_inner("127.0.0.1:0".parse().unwrap(), auth, None)
     }
 
     /// E9b 自检：TLS + 嵌入测试证书；可选鉴权。
     pub fn start_tls(auth: Option<(String, String)>) -> io::Result<Self> {
         let server_config = tls::build_test_server_config()?;
-        Self::start_inner(auth, Some(server_config))
+        Self::start_inner("127.0.0.1:0".parse().unwrap(), auth, Some(server_config))
     }
 
     fn start_inner(
+        bind: SocketAddr,
         auth: Option<(String, String)>,
         tls_config: Option<Arc<ServerConfig>>,
     ) -> io::Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let listener = TcpListener::bind(bind)?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
         let stop = Arc::new(AtomicBool::new(false));
