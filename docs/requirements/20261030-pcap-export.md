@@ -35,7 +35,8 @@
 
 ## 非目标
 
-- pcapng、导入 `.pcap` 回灌 `.fcap`
+- pcapng（导入见 E14，仍不含 pcapng）
+- ~~导入 `.pcap` 回灌 `.fcap`~~ → **已立项** `20261030-pcap-import.md`（E14）
 - 真实 MAC / 真实 IP 校验和保真（合成头；UDP/TCP checksum 可为 0）
 - 串口 / MQTT 的专用 DLT / 用户链路类型
 - 替代 `.fcap` 作为重放输入
@@ -46,4 +47,4 @@
 
 ## 下一步
 
-增强项 E8–E10 已收口；后续视需求再定（如 pcap 导入、客户端证书等）。
+E10 已收口。pcap 导入见 `20261030-pcap-import.md`（E14）。
