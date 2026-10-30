@@ -45,3 +45,53 @@ Needs built engine (`engine/target/release` or `debug` `fieldreplay-engine.exe`)
 4. Tell the guide "MQTT OK" when PASS
 
 Uses engine mini-broker (no Mosquitto install). Plain MQTT, no TLS/auth (E15 later).
+
+## E2E-5: FieldReplay multi-channel record + export .fcap
+
+Goal: with fake sources running, FieldReplay records UDP+TCP+MQTT(+optional video)
+into one session and downloads a real `.fcap`.
+
+**Do NOT run** `02_run_udp_recv.bat` / `03_run_tcp_recv.bat` / `04_run_mqtt_sub.bat`
+during this step — FieldReplay replaces those receivers.
+
+### A. Fake sources (keep windows open)
+
+1. `01_start_mediamtx.bat` then `01_push_testpattern.bat` (optional video)
+2. `04_start_mqtt_broker.bat` then `04_start_mqtt_pub.bat`
+3. `02_start_udp_send.bat` (STAT -> `127.0.0.1:56001`)
+4. **TCP sender later** — start only AFTER FieldReplay is already recording
+   (FR listens `:57002`; then `03_start_tcp_send.bat`)
+
+### B. Launch app
+
+- Prefer fresh pack: `tools\pack_green.bat` then
+  `pack\FieldReplay\fieldreplay.exe`
+- Or print this checklist: `05_print_record_steps.bat`
+
+### C. Channel setup in UI (录制页)
+
+Default demo channels use wrong ports / COM3 — **turn them all OFF**.
+Then **添加自定义端口** for lab channels only:
+
+| Name | Type | Param |
+|------|------|-------|
+| e2e-udp | UDP | `0.0.0.0:56001` |
+| e2e-tcp | TCP | `0.0.0.0:57002` (engine role defaults to server) |
+| e2e-mqtt | MQTT | `127.0.0.1:1883, e2e/sensor` (TLS off) |
+| e2e-video | 视频 RTP | `rtsp://127.0.0.1:8554/live/cam1` (optional) |
+
+Leave serial disabled (no COM needed).
+
+### D. Record + export
+
+1. Confirm UI shows engine connected
+2. Start multi-channel record (all enabled channels)
+3. Within a few seconds: `03_start_tcp_send.bat`
+4. Watch packet list ~10–20s — expect `STAT,...` / `LASER,...` / `SENSOR,...`
+   (and video frames if RTSP enabled)
+5. Stop and export `.fcap` (engine path, not JSON demo)
+6. Tell the guide "E2E-5 OK" with: channel count, rough packet count, file size
+
+Fail checks: serial still enabled; TCP sender started before FR listen;
+old `*_recv` / mqtt-sub still bound on the same ports; engine disconnected
+(export falls back to JSON demo — not PASS).
