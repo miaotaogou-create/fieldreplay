@@ -111,9 +111,9 @@ E10 已能 **fcap → pcap**（合成以太网，仅 UDP/视频/TCP data）。�
 
 ### E14b（引擎）
 
-- [ ] 经典以太网 pcap（含本工具 E10 产物）→ 会话；UDP/TCP 有载荷帧 `written` 正确
-- [ ] 串口式无关帧（ARP 等）进 `skipped`；全跳过则失败
-- [ ] 自检：构造/导出 pcap → 导入 → payload 与相对轴对齐
+- [x] 经典以太网 pcap（含本工具 E10 产物）→ 会话；UDP/TCP 有载荷帧 `written` 正确
+- [x] 串口式无关帧（ARP 等）进 `skipped`；全跳过则失败
+- [x] 自检：构造/导出 pcap → 导入 → payload 与相对轴对齐（`self_check_pcap_import`）
 
 ### E14c（控制面）
 
@@ -148,4 +148,4 @@ E10 已能 **fcap → pcap**（合成以太网，仅 UDP/视频/TCP data）。�
 
 ## 建议下一手
 
-资深软件工程师：E14b（引擎 pcap→会话 + 自检）。新开对话可贴：`新对话读一下进度本，接着做下一步。`
+资深软件工程师：E14c（控制面 `session.importPcap` + CLI `import-pcap`）。新开对话可贴：`新对话读一下进度本，接着做下一步。`

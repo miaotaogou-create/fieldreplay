@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E14 pcap 导入**（E14a 需求已入库；下一格 E14b） |
+| **下一步** | **E14 pcap 导入**（E14b 引擎已完成；下一格 E14c 控制面） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -174,7 +174,7 @@ fieldreplay/
 | 轨 | 首格 | 内容 | 状态 |
 |----|------|------|------|
 | A **E13** trim+marker | — | E13a–d 全部完成 | **已收口** |
-| B **E14** pcap 导入 | E14b | 引擎 pcap→fcap + 自检 | **进行中** |
+| B **E14** pcap 导入 | E14c | 控制面 import + CLI | **进行中** |
 | C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
 | D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 | 待命 |
 | E **R1** 回归 | R1a | 手测 E12d 多协议；无新功能 | 待命 |
@@ -193,7 +193,7 @@ fieldreplay/
 | ID | 任务 | 状态 | 完成记录 |
 |----|------|------|----------|
 | E14a | 需求入库（链路范围、跳过、往返、非目标） | [x] | 2026-10-30：`docs/requirements/20261030-pcap-import.md`；仅以太网经典 pcap + IPv4 UDP/TCP data；与 E10 往返保载荷与相对轴 |
-| E14b | 引擎：pcap→fcap + 自检 | [ ] | |
+| E14b | 引擎：pcap→fcap + 自检 | [x] | 2026-10-30：`pcap_bytes_to_session` / `self_check_pcap_import`；E10 往返载荷+相对轴；ARP skipped；全跳过/非以太网拒绝 |
 | E14c | 控制面 import | [ ] | |
 | E14d | UI 载入入口 + 手测 | [ ] | |
 

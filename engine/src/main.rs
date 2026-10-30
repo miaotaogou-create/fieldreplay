@@ -18,6 +18,7 @@ use fieldreplay_engine::{
     replay_video_rtsp_from_file, run_io_acceptance,     self_check_multi_udp,
     self_check_multi_udp_mqtt_replay, self_check_multi_udp_replay,
     self_check_multi_udp_serial_replay, self_check_multi_udp_tcp_replay, self_check_pcap_export,
+    self_check_pcap_import,
     serial_pair_from_env, serve_control, write_session_pcap, MiniBroker, MiniRtspServer,
     MqttClient, MqttConfig, MqttRecordOptions, MqttReplayOptions, Parity, FaultInjection,
     RecordOptions, ReplayOptions, RtspClient, RtspReplayOptions, RtspUrl, SerialConfig, SerialPort,
@@ -770,6 +771,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: pcap 导出… ");
     let _ = io::stdout().flush();
     self_check_pcap_export()?;
+    println!("ok");
+
+    print!("self-check: pcap 导入… ");
+    let _ = io::stdout().flush();
+    self_check_pcap_import()?;
     println!("ok");
 
     print!("self-check: UDP 录放环回… ");

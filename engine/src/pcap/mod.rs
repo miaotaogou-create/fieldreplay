@@ -1,6 +1,13 @@
-//! 经典 libpcap 导出（E10）：UDP/视频/TCP 数据帧合成以太网帧；串口/MQTT 跳过。
+//! 经典 libpcap：导出（E10）与导入（E14b）。
 //!
 //! ponytail: 合成 L2/L3/L4，checksum 可为 0；上限是 Wireshark 校验告警，升级路径是补真实校验和或改 pcapng。
+
+mod import;
+
+pub use import::{
+    pcap_bytes_to_session, read_pcap_to_session, self_check_pcap_import, PcapImportSession,
+    PcapImportStats, PCAP_MAGIC_NSEC,
+};
 
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};

@@ -39,8 +39,9 @@ pub use multi_replay::{
     MultiReplayTarget, SerialMultiTarget, TcpMultiTarget,
 };
 pub use pcap::{
-    self_check_pcap_export, session_to_pcap_bytes, write_session_pcap, PcapExportStats,
-    LINKTYPE_ETHERNET, PCAP_MAGIC_USEC,
+    pcap_bytes_to_session, read_pcap_to_session, self_check_pcap_export, self_check_pcap_import,
+    session_to_pcap_bytes, write_session_pcap, PcapExportStats, PcapImportSession, PcapImportStats,
+    LINKTYPE_ETHERNET, PCAP_MAGIC_NSEC, PCAP_MAGIC_USEC,
 };
 pub use rtsp::{MiniRtspServer, RtspClient, RtspUrl};
 pub use record::{

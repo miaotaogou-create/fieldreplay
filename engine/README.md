@@ -63,7 +63,7 @@ fieldreplay-engine export-pcap --in session.fcap --out session.pcap
 | 模块 | 职责 |
 |------|------|
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
-| `pcap` | 经典 libpcap 导出（合成以太网；E10） |
+| `pcap` | 经典 libpcap 导出（E10）与导入（E14b：以太网 IPv4 UDP/TCP data） |
 | `clock` | 录制相对微秒、重放等待 |
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
 | `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；打开失败可读摘要；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
@@ -88,4 +88,5 @@ cargo run -- self-check
 实口/虚口手测步骤见 [`../docs/requirements/20261030-serial-enhance.md`](../docs/requirements/20261030-serial-enhance.md)（一端灌、一端录；重放写对端口）。  
 TCP 手测：录制侧与设备（或 `ncat`）按角色对接；重放时工具角色自动对调，上位机仍按原角色连接。  
 MQTT 手测：连现场/实验室 Broker；录=订阅，放=发布。E9a：`--mqtt-user` / `--mqtt-password`。E9b：`--mqtt-tls` / `--mqtt-ca` / `--mqtt-tls-server-name`（控制面/UI 同字段；见 `docs/requirements/20261030-mqtt-auth.md`）。  
-pcap：`export-pcap` 或控制面/UI「同时导出 .pcap」；见 `docs/requirements/20261030-pcap-export.md`。
+pcap 导出：`export-pcap` 或控制面/UI「同时导出 .pcap」；见 `docs/requirements/20261030-pcap-export.md`。  
+pcap 导入：引擎 `pcap_bytes_to_session`（E14b）；控制面/CLI/UI 见 E14c–d、`docs/requirements/20261030-pcap-import.md`。
