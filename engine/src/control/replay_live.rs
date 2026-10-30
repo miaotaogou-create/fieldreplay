@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::fcap::ChannelType;
 use crate::mqtt::MqttConfig;
 use crate::multi_replay::{
-    open_datagram_target, replay_multi_datagram_from_file_with, DatagramTarget, MultiReplayOptions,
+    open_datagram_target, open_tcp_multi_target, replay_multi_from_file_with, MultiReplayOptions,
+    MultiReplayTarget,
 };
 use crate::replay::{
     replay_mqtt_from_file_with, replay_serial_with_port_with, replay_tcp_from_file_with,
@@ -20,6 +21,7 @@ use crate::replay::{
     SerialReplayOptions, TcpReplayOptions,
 };
 use crate::serial::{Parity, SerialConfig, SerialPort};
+use crate::tcp::{TcpConfig, TcpRole};
 
 use super::dto::channel_type_str;
 use super::hub::PushHub;
@@ -185,6 +187,19 @@ pub fn handle_replay_start(
     )
 }
 
+enum BoundMulti {
+    Udp {
+        ch: u16,
+        expect: ChannelType,
+        addr: SocketAddr,
+    },
+    Tcp {
+        ch: u16,
+        endpoint: SocketAddr,
+        play_role: TcpRole,
+    },
+}
+
 fn start_multi_replay(
     id: &str,
     elems: &[String],
@@ -196,7 +211,7 @@ fn start_multi_replay(
     hub: &Arc<PushHub>,
 ) -> String {
     let session = state.session.as_ref().unwrap();
-    let mut bound: Vec<(u16, String, String, ChannelType, SocketAddr)> = Vec::new();
+    let mut bound: Vec<BoundMulti> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut targets_json = String::from("[");
 
@@ -222,11 +237,12 @@ fn start_multi_replay(
         let expect = match ty_s.as_str() {
             "udp" => ChannelType::Udp,
             "video" | "video_stream" => ChannelType::Video,
-            "serial" | "tcp" | "mqtt" => {
+            "tcp" => ChannelType::Tcp,
+            "serial" | "mqtt" => {
                 return err_result(
                     id,
                     &format!(
-                        "targets[{i}] 多路对齐重放本阶段仅支持 udp / video（UDP 推送），不支持 {ty_s}"
+                        "targets[{i}] 多路对齐重放暂不支持 {ty_s}（E12a 已支持 tcp；串口/MQTT 见后续）"
                     ),
                 );
             }
@@ -253,10 +269,6 @@ fn start_multi_replay(
                 );
             }
         }
-        let addr = match parse_udp_target(&config_raw) {
-            Ok(a) => a,
-            Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
-        };
         if !targets_json.ends_with('[') {
             targets_json.push(',');
         }
@@ -269,7 +281,43 @@ fn start_multi_replay(
                 config_raw.as_str()
             }
         ));
-        bound.push((ch, ty_s, config_raw, expect, addr));
+
+        match expect {
+            ChannelType::Udp | ChannelType::Video => {
+                let addr = match parse_udp_target(&config_raw) {
+                    Ok(a) => a,
+                    Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
+                };
+                bound.push(BoundMulti::Udp {
+                    ch,
+                    expect,
+                    addr,
+                });
+            }
+            ChannelType::Tcp => {
+                let endpoint = match parse_tcp_endpoint(&config_raw) {
+                    Ok(a) => a,
+                    Err(e) => return err_result(id, &format!("targets[{i}] {e}")),
+                };
+                let recorded = match TcpConfig::from_config_json(&entry.config_json) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return err_result(
+                            id,
+                            &format!("targets[{i}] 会话 TCP 通道配置无效: {e}"),
+                        );
+                    }
+                };
+                bound.push(BoundMulti::Tcp {
+                    ch,
+                    endpoint,
+                    play_role: recorded.role.invert(),
+                });
+            }
+            _ => {
+                return err_result(id, &format!("targets[{i}] 内部错误：未处理类型"));
+            }
+        }
     }
     targets_json.push(']');
 
@@ -308,12 +356,30 @@ fn start_multi_replay(
             .unwrap_or(0),
     );
 
-    let mut datagrams: Vec<DatagramTarget> = Vec::with_capacity(bound.len());
-    for (ch, _ty, _cfg, expect, addr) in &bound {
-        match open_datagram_target(*ch, *expect, *addr, "0.0.0.0:0".parse().unwrap()) {
-            Ok(t) => datagrams.push(t),
-            Err(e) => {
-                return err_result(id, &format!("打开目标通道 {ch} 失败: {e}"));
+    let mut sinks: Vec<MultiReplayTarget> = Vec::with_capacity(bound.len());
+    for b in &bound {
+        match b {
+            BoundMulti::Udp {
+                ch, expect, addr, ..
+            } => match open_datagram_target(*ch, *expect, *addr, "0.0.0.0:0".parse().unwrap())
+            {
+                Ok(t) => sinks.push(MultiReplayTarget::Udp(t)),
+                Err(e) => {
+                    return err_result(id, &format!("打开目标通道 {ch} 失败: {e}"));
+                }
+            },
+            BoundMulti::Tcp {
+                ch,
+                endpoint,
+                play_role,
+                ..
+            } => {
+                sinks.push(MultiReplayTarget::Tcp(open_tcp_multi_target(
+                    *ch,
+                    *endpoint,
+                    *play_role,
+                    Duration::from_millis(200),
+                )));
             }
         }
     }
@@ -341,14 +407,14 @@ fn start_multi_replay(
             ));
         };
         let mut on: OnReplayProgress<'_> = Some(&mut hook);
-        let result = replay_multi_datagram_from_file_with(
+        let result = replay_multi_from_file_with(
             &MultiReplayOptions {
                 in_path: path_c,
                 speed,
                 fault,
                 looping,
             },
-            &datagrams,
+            &mut sinks,
             &stop_c,
             &paused_c,
             &seek_c,

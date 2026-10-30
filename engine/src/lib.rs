@@ -30,8 +30,9 @@ pub use multi_record::{
     record_multi_to_file, self_check_multi_udp, ChannelJob, MultiRecordOptions, PacketHook,
 };
 pub use multi_replay::{
-    open_datagram_target, replay_multi_datagram_from_file_with, self_check_multi_udp_replay,
-    DatagramTarget, MultiReplayOptions,
+    open_datagram_target, open_tcp_multi_target, replay_multi_datagram_from_file_with,
+    replay_multi_from_file_with, self_check_multi_udp_replay, self_check_multi_udp_tcp_replay,
+    DatagramTarget, MultiReplayOptions, MultiReplayTarget, TcpMultiTarget,
 };
 pub use pcap::{
     self_check_pcap_export, session_to_pcap_bytes, write_session_pcap, PcapExportStats,

@@ -76,7 +76,7 @@
 | `session.exportPcap` | 将内存会话写成经典 `.pcap`（合成以太网；UDP/视频/TCP data；串口/MQTT 跳过），响应含 `b64` / `written` / `skipped`；门禁同 export（E10） |
 | `record.start` | 启真实通道录制。单路：`type` + `config`；多路（E11a）：`channels:[{type,name?,config},…]`（与单路字段二选一，多路优先）。可选 `out` / `name` / `sessionTitle`。同会话共享墙钟与 `.fcap`；启动期任一路失败则整次失败。UI（E11b）对全部 enabled 通道下发 `channels[]`。预览帧推送 `{"event":"record.packet","packet":{...}}`（无 `id`；`packet.ch` 为通道下标） |
 | `record.stop` | 停止并 finalize；会话写入控制面内存；响应含 `packetCount` / `out` |
-| `replay.start` | 对已载入会话按时间轴重放。单路：`type` + `config`；多路目标（E11c）：`targets:[{ch?,type,config},…]`（按通道 index 绑定；缺目标进响应 `skipped[]`；本阶段多路 sink 为 UDP/视频 UDP 推送）。UDP `target_ip`/`target_port`；视频同 UDP，或单路 `mode=rtsp_listen`+`listen_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`（角色由文件取反）；MQTT `broker`/`port` + 可选凭据/TLS 字段。可选 `speed` / `loop` / `fault`（多路时作用于整会话时间轴）。与录制互斥。推送 `replay.progress` 与 `replay.done` |
+| `replay.start` | 对已载入会话按时间轴重放。单路：`type` + `config`；多路目标（E11c/E12a）：`targets:[{ch?,type,config},…]`（按通道 index 绑定；缺目标进响应 `skipped[]`；多路 sink：UDP/视频 UDP 推送/TCP；串口/MQTT/RTSP listen 仍单路或见 E12 后续）。UDP `target_ip`/`target_port`；视频同 UDP，或单路 `mode=rtsp_listen`+`listen_port`；串口 `port_name`+波特率；TCP 重放侧 `host`/`port`（角色由文件取反）；MQTT `broker`/`port` + 可选凭据/TLS 字段。可选 `speed` / `loop` / `fault`（多路时作用于整会话时间轴）。与录制互斥。推送 `replay.progress` 与 `replay.done` |
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位（`loop:true` 时仅 stop/出错才 done） |
 | `serial.list` | E8a：枚举本机串口名（Windows COM）；响应 `{ "ports": ["COM3", ...] }`；无口为空数组。E8b：可选自检 `FIELDREPLAY_SERIAL_PAIR=COMa,COMb`（未设则跳过）。E8c：打开失败经 `format_open_error` 可读摘要；录制失败推 `record.error`；重放失败时 `replay.done` 带 `error` |
 

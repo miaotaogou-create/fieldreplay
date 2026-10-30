@@ -1,10 +1,10 @@
-//! 多通道对齐重放（E11c）：单一相对时间轴，按 `channel_index` 扇出到各目标。
+//! 多通道对齐重放（E11c / E12）：单一相对时间轴，按 `channel_index` 扇出到各目标。
 //!
-//! ponytail: 本阶段 sink 仅 UDP/视频(UDP 推送)；串口/TCP/MQTT/RTSP 多路目标留待后续。
-//! 天花板是混合类型会话只能部分重放；升级路径是为各类型实现 `ReplaySink` 后并入本调度器。
+//! ponytail: E12a 起 sink 含 UDP/视频(UDP) 与 TCP；串口/MQTT/RTSP 多路目标见 E12b/c。
+//! 天花板是混合类型需各 sink 进同一调度器；升级路径继续往 `MultiReplayTarget` 加变体。
 
 use std::io;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::{SocketAddr, TcpStream, UdpSocket};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -15,6 +15,7 @@ use crate::replay::{
     emit_with_fault, take_pending_seek, try_restart_loop, FaultInjection, FaultRng,
     OnReplayProgress,
 };
+use crate::tcp::{accept_until, connect, listen, write_all, TcpRole};
 use crate::udp::{bind_sender, send_to};
 
 /// 一路已打开的数据报目标（UDP 或视频 UDP 推送）。
@@ -25,6 +26,55 @@ pub struct DatagramTarget {
     pub addr: SocketAddr,
 }
 
+/// 一路 TCP 多路目标：连接在时间轴上的 `TcpConnect` 事件时建立（与单路语义一致）。
+pub struct TcpMultiTarget {
+    pub channel_index: u16,
+    pub endpoint: SocketAddr,
+    pub play_role: TcpRole,
+    pub poll_timeout: Duration,
+    pub stream: Option<TcpStream>,
+}
+
+/// 多路重放目标（E12a：UDP + TCP）。
+pub enum MultiReplayTarget {
+    Udp(DatagramTarget),
+    Tcp(TcpMultiTarget),
+}
+
+impl MultiReplayTarget {
+    pub fn channel_index(&self) -> u16 {
+        match self {
+            Self::Udp(t) => t.channel_index,
+            Self::Tcp(t) => t.channel_index,
+        }
+    }
+
+    pub fn expect(&self) -> ChannelType {
+        match self {
+            Self::Udp(t) => t.expect,
+            Self::Tcp(_) => ChannelType::Tcp,
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Udp(t) => format!("{}→{}", t.channel_index, t.addr),
+            Self::Tcp(t) => format!(
+                "{}→tcp:{}:{}",
+                t.channel_index,
+                t.play_role.as_str(),
+                t.endpoint
+            ),
+        }
+    }
+
+    fn clear_stream_on_seek(&mut self) {
+        if let Self::Tcp(t) = self {
+            t.stream = None;
+        }
+    }
+}
+
 pub struct MultiReplayOptions {
     pub in_path: PathBuf,
     pub speed: f64,
@@ -33,9 +83,9 @@ pub struct MultiReplayOptions {
 }
 
 /// 按相对时间轴统一调度：有目标的通道发往对应 sink，无目标通道跳过。
-pub fn replay_multi_datagram_from_file_with(
+pub fn replay_multi_from_file_with(
     opts: &MultiReplayOptions,
-    targets: &[DatagramTarget],
+    targets: &mut [MultiReplayTarget],
     stop: &AtomicBool,
     paused: &AtomicBool,
     seek_us: &AtomicU64,
@@ -56,7 +106,7 @@ pub fn replay_multi_datagram_from_file_with(
 
     let max_ch = targets
         .iter()
-        .map(|t| t.channel_index)
+        .map(|t| t.channel_index())
         .max()
         .unwrap_or(0) as usize;
     let session_max = reader
@@ -66,35 +116,37 @@ pub fn replay_multi_datagram_from_file_with(
         .max()
         .unwrap_or(0) as usize;
     let slot_n = max_ch.max(session_max) + 1;
-    let mut by_ch: Vec<Option<&DatagramTarget>> = vec![None; slot_n];
-    for t in targets {
-        let i = t.channel_index as usize;
-        if by_ch[i].is_some() {
+    let mut ch_to_tgt: Vec<Option<usize>> = vec![None; slot_n];
+    for (i, t) in targets.iter().enumerate() {
+        let ch = t.channel_index() as usize;
+        if ch_to_tgt[ch].is_some() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("targets 中通道 {i} 重复"),
+                format!("targets 中通道 {ch} 重复"),
             ));
         }
         let Some(entry) = reader
             .channels()
             .iter()
-            .find(|c| c.channel_index == t.channel_index)
+            .find(|c| c.channel_index == t.channel_index())
         else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("会话无通道 {}", t.channel_index),
+                format!("会话无通道 {}", t.channel_index()),
             ));
         };
-        if entry.channel_type != t.expect {
+        if entry.channel_type != t.expect() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "通道 {} 类型不匹配：会话 {:?}，目标 {:?}",
-                    t.channel_index, entry.channel_type, t.expect
+                    t.channel_index(),
+                    entry.channel_type,
+                    t.expect()
                 ),
             ));
         }
-        by_ch[i] = Some(t);
+        ch_to_tgt[ch] = Some(i);
     }
 
     let speed = SessionClock::clamp_speed(opts.speed);
@@ -110,7 +162,7 @@ pub fn replay_multi_datagram_from_file_with(
 
     let map_desc: String = targets
         .iter()
-        .map(|t| format!("{}→{}", t.channel_index, t.addr))
+        .map(|t| t.label())
         .collect::<Vec<_>>()
         .join(", ");
     eprintln!(
@@ -129,6 +181,9 @@ pub fn replay_multi_datagram_from_file_with(
         }
         if let Some(target) = take_pending_seek(seek_us, &mut reader, &mut base, speed)? {
             skip_before_us = target;
+            for t in targets.iter_mut() {
+                t.clear_stream_on_seek();
+            }
             if let Some(cb) = on_progress.as_mut() {
                 cb(sent, target);
             }
@@ -147,20 +202,57 @@ pub fn replay_multi_datagram_from_file_with(
                 sent,
                 on_progress,
             )? {
+                for t in targets.iter_mut() {
+                    t.clear_stream_on_seek();
+                }
                 continue;
             }
             break;
         };
-        if pkt.kind != PacketKind::Data {
-            continue;
-        }
-        let Some(tgt) = by_ch.get(pkt.channel_index as usize).and_then(|x| *x) else {
+
+        let Some(ti) = ch_to_tgt
+            .get(pkt.channel_index as usize)
+            .and_then(|x| *x)
+        else {
             continue;
         };
-        pass_matched += 1;
-        if pkt.relative_us < skip_before_us {
+
+        // UDP/视频：只关心 Data；TCP：连接事件也计入本趟匹配
+        let is_udp = matches!(targets[ti], MultiReplayTarget::Udp(_));
+        if is_udp && pkt.kind != PacketKind::Data {
             continue;
         }
+        if matches!(targets[ti], MultiReplayTarget::Tcp(_))
+            && !matches!(
+                pkt.kind,
+                PacketKind::Data | PacketKind::TcpConnect | PacketKind::TcpDisconnect
+            )
+        {
+            continue;
+        }
+
+        pass_matched += 1;
+
+        if pkt.relative_us < skip_before_us {
+            if let MultiReplayTarget::Tcp(t) = &mut targets[ti] {
+                match pkt.kind {
+                    PacketKind::TcpConnect => {
+                        t.stream = Some(open_tcp_stream(
+                            t.play_role,
+                            t.endpoint,
+                            stop,
+                            t.poll_timeout,
+                        )?);
+                    }
+                    PacketKind::TcpDisconnect => {
+                        t.stream = None;
+                    }
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
         match SessionClock::sleep_until_relative_interruptible(
             &mut base,
             pkt.relative_us,
@@ -173,19 +265,117 @@ pub fn replay_multi_datagram_from_file_with(
             WaitResult::Seek => continue,
             WaitResult::Ready => {}
         }
-        emit_with_fault(
-            &pkt.payload,
-            &fault,
-            &mut rng,
-            pkt.relative_us,
-            &mut sent,
-            on_progress,
-            |bytes| send_to(&tgt.sock, bytes, tgt.addr).map(|_| ()),
-        )?;
+
+        match &mut targets[ti] {
+            MultiReplayTarget::Udp(tgt) => {
+                emit_with_fault(
+                    &pkt.payload,
+                    &fault,
+                    &mut rng,
+                    pkt.relative_us,
+                    &mut sent,
+                    on_progress,
+                    |bytes| send_to(&tgt.sock, bytes, tgt.addr).map(|_| ()),
+                )?;
+            }
+            MultiReplayTarget::Tcp(tgt) => match pkt.kind {
+                PacketKind::TcpConnect => {
+                    tgt.stream = Some(open_tcp_stream(
+                        tgt.play_role,
+                        tgt.endpoint,
+                        stop,
+                        tgt.poll_timeout,
+                    )?);
+                }
+                PacketKind::Data => {
+                    if pkt.direction != 0 {
+                        continue;
+                    }
+                    let Some(ref s) = tgt.stream else {
+                        eprintln!(
+                            "警告：通道 {} 未连接就遇到数据帧，已跳过",
+                            tgt.channel_index
+                        );
+                        continue;
+                    };
+                    emit_with_fault(
+                        &pkt.payload,
+                        &fault,
+                        &mut rng,
+                        pkt.relative_us,
+                        &mut sent,
+                        on_progress,
+                        |bytes| write_all(s, bytes),
+                    )?;
+                }
+                PacketKind::TcpDisconnect => {
+                    tgt.stream = None;
+                }
+                _ => {}
+            },
+        }
     }
 
     eprintln!("重放结束（多路）：发送 {sent} 帧");
     Ok(sent)
+}
+
+/// 兼容旧调用：仅数据报目标时转发到统一调度器。
+pub fn replay_multi_datagram_from_file_with(
+    opts: &MultiReplayOptions,
+    targets: &[DatagramTarget],
+    stop: &AtomicBool,
+    paused: &AtomicBool,
+    seek_us: &AtomicU64,
+    from_us: u64,
+    on_progress: &mut OnReplayProgress<'_>,
+) -> io::Result<u64> {
+    // DatagramTarget 不含 Copy；搬进枚举后由调度器持有
+    let mut owned: Vec<MultiReplayTarget> = Vec::with_capacity(targets.len());
+    for t in targets {
+        let sock = t.sock.try_clone().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("克隆 UDP 发送端失败: {e}"),
+            )
+        })?;
+        owned.push(MultiReplayTarget::Udp(DatagramTarget {
+            channel_index: t.channel_index,
+            expect: t.expect,
+            sock,
+            addr: t.addr,
+        }));
+    }
+    replay_multi_from_file_with(opts, &mut owned, stop, paused, seek_us, from_us, on_progress)
+}
+
+fn open_tcp_stream(
+    play_role: TcpRole,
+    endpoint: SocketAddr,
+    stop: &AtomicBool,
+    poll_timeout: Duration,
+) -> io::Result<TcpStream> {
+    match play_role {
+        TcpRole::Server => {
+            let listener = listen(endpoint)?;
+            let local = listener.local_addr().unwrap_or(endpoint);
+            eprintln!("TCP 多路重放等待上位机接入：{local}");
+            match accept_until(&listener, stop, poll_timeout)? {
+                Some((s, peer)) => {
+                    eprintln!("TCP 多路已接入：{peer}");
+                    Ok(s)
+                }
+                None => Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "等待 TCP 连接时被停止",
+                )),
+            }
+        }
+        TcpRole::Client => {
+            eprintln!("TCP 多路重放连接：{endpoint}");
+            connect(endpoint, poll_timeout)
+        }
+    }
 }
 
 /// 打开数据报发送端；失败则整次失败。
@@ -202,6 +392,22 @@ pub fn open_datagram_target(
         sock,
         addr,
     })
+}
+
+/// 构造尚未建连的 TCP 多路目标（连接在时间轴事件上建立）。
+pub fn open_tcp_multi_target(
+    channel_index: u16,
+    endpoint: SocketAddr,
+    play_role: TcpRole,
+    poll_timeout: Duration,
+) -> TcpMultiTarget {
+    TcpMultiTarget {
+        channel_index,
+        endpoint,
+        play_role,
+        poll_timeout,
+        stream: None,
+    }
 }
 
 /// 最小自检：两路 UDP 同会话录制后对齐重放，载荷与通道绑定正确。
@@ -349,8 +555,6 @@ pub fn self_check_multi_udp_replay() -> io::Result<()> {
         "fieldreplay_multi_replay_skip_{}.fcap",
         std::process::id()
     ));
-    // 复用：再录一份过短；改为直接用内存不够，简单再录一轮太慢——改为对已删文件不测。
-    // 跳过语义由控制面响应 `skipped` 覆盖；此处确认「只绑一路」时另一路不串到本 socket。
     let a2 = {
         let s = UdpSocket::bind("127.0.0.1:0")?;
         s.local_addr()?
@@ -443,5 +647,193 @@ pub fn self_check_multi_udp_replay() -> io::Result<()> {
     }
 
     eprintln!("  多路 UDP 对齐重放自检：通过（sent={sent}，skip 路径 ok）");
+    Ok(())
+}
+
+/// E12a：同会话 UDP + TCP（录制 server）对齐重放；TCP 重放侧为 client。
+pub fn self_check_multi_udp_tcp_replay() -> io::Result<()> {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream, UdpSocket};
+    use std::sync::Arc;
+    use std::thread;
+
+    use crate::multi_record::{record_multi_to_file, ChannelJob, MultiRecordOptions};
+    use crate::tcp::{TcpConfig, TcpRole};
+
+    let udp_bind = {
+        let s = UdpSocket::bind("127.0.0.1:0")?;
+        s.local_addr()?
+    };
+    let tcp_listen = {
+        let l = TcpListener::bind("127.0.0.1:0")?;
+        let addr = l.local_addr()?;
+        // 仅占端口拿地址；真正 listen 交给多路录制
+        drop(l);
+        addr
+    };
+
+    let out = std::env::temp_dir().join(format!(
+        "fieldreplay_multi_udp_tcp_{}.fcap",
+        std::process::id()
+    ));
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_c = Arc::clone(&stop);
+    let out_c = out.clone();
+    let tcp_cfg = TcpConfig::new(TcpRole::Server, "127.0.0.1", tcp_listen.port());
+
+    let rec = thread::spawn(move || {
+        record_multi_to_file(
+            &MultiRecordOptions {
+                out_path: out_c,
+                session_title: Some("multi-udp-tcp".into()),
+                max_duration: Some(Duration::from_secs(4)),
+                poll_timeout: Duration::from_millis(50),
+            },
+            &[
+                ChannelJob::Udp {
+                    name: "u0".into(),
+                    bind: udp_bind,
+                },
+                ChannelJob::Tcp {
+                    name: "t1".into(),
+                    config: tcp_cfg,
+                },
+            ],
+            &stop_c,
+            None,
+        )
+    });
+
+    thread::sleep(Duration::from_millis(250));
+    let udp_tx = UdpSocket::bind("127.0.0.1:0")?;
+    udp_tx.send_to(b"U1", udp_bind)?;
+
+    let mut tcp_peer = TcpStream::connect(tcp_listen)?;
+    tcp_peer.set_write_timeout(Some(Duration::from_millis(500)))?;
+    tcp_peer.write_all(b"T1")?;
+    tcp_peer.flush()?;
+    thread::sleep(Duration::from_millis(40));
+    udp_tx.send_to(b"U2", udp_bind)?;
+    tcp_peer.write_all(b"T2")?;
+    tcp_peer.flush()?;
+    thread::sleep(Duration::from_millis(120));
+    drop(tcp_peer);
+    thread::sleep(Duration::from_millis(80));
+    stop.store(true, Ordering::SeqCst);
+
+    let n = rec
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "UDP+TCP 录制线程 panic"))??;
+    if n < 4 {
+        let _ = std::fs::remove_file(&out);
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP+TCP 录制帧数不足: {n}"),
+        ));
+    }
+
+    let udp_rx = UdpSocket::bind("127.0.0.1:0")?;
+    udp_rx.set_read_timeout(Some(Duration::from_millis(800)))?;
+    let udp_rx_addr = udp_rx.local_addr()?;
+
+    let tcp_rx_listener = TcpListener::bind("127.0.0.1:0")?;
+    let tcp_rx_addr = tcp_rx_listener.local_addr()?;
+    let tcp_got = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let tcp_got_c = Arc::clone(&tcp_got);
+    let acceptor = thread::spawn(move || -> io::Result<()> {
+        tcp_rx_listener.set_nonblocking(false)?;
+        let (mut stream, _) = tcp_rx_listener.accept()?;
+        stream.set_read_timeout(Some(Duration::from_millis(1500)))?;
+        let mut buf = [0u8; 256];
+        let mut acc = Vec::new();
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => acc.extend_from_slice(&buf[..n]),
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+            if acc.len() >= 4 {
+                break;
+            }
+        }
+        *tcp_got_c.lock().unwrap() = acc;
+        Ok(())
+    });
+
+    // 录制为 server → 重放 client 连到我们的 listener
+    let mut targets = vec![
+        MultiReplayTarget::Udp(open_datagram_target(
+            0,
+            ChannelType::Udp,
+            udp_rx_addr,
+            "0.0.0.0:0".parse().unwrap(),
+        )?),
+        MultiReplayTarget::Tcp(open_tcp_multi_target(
+            1,
+            tcp_rx_addr,
+            TcpRole::Client,
+            Duration::from_millis(200),
+        )),
+    ];
+
+    let stop_r = AtomicBool::new(false);
+    let paused = AtomicBool::new(false);
+    let seek = AtomicU64::new(SessionClock::NO_SEEK);
+    let mut on: OnReplayProgress<'_> = None;
+    let sent = replay_multi_from_file_with(
+        &MultiReplayOptions {
+            in_path: out.clone(),
+            speed: 50.0,
+            fault: FaultInjection::OFF,
+            looping: false,
+        },
+        &mut targets,
+        &stop_r,
+        &paused,
+        &seek,
+        0,
+        &mut on,
+    );
+    let _ = std::fs::remove_file(&out);
+    let sent = sent?;
+    if sent < 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP+TCP 重放发送帧数不足: {sent}"),
+        ));
+    }
+
+    acceptor
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "TCP 接收线程 panic"))??;
+
+    let mut got_u = Vec::new();
+    let mut buf = [0u8; 64];
+    for _ in 0..8 {
+        if let Ok((n, _)) = udp_rx.recv_from(&mut buf) {
+            got_u.push(buf[..n].to_vec());
+        }
+    }
+    if got_u.len() < 2 || got_u[0] != b"U1" || got_u[1] != b"U2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("UDP 通道载荷不符: {:?}", got_u),
+        ));
+    }
+    let got_t = tcp_got.lock().unwrap().clone();
+    if got_t != b"T1T2" {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("TCP 通道载荷不符: {:?}", got_t),
+        ));
+    }
+
+    eprintln!("  多路 UDP+TCP 对齐重放自检：通过（sent={sent}）");
     Ok(())
 }
