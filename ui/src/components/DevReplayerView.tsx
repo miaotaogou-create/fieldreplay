@@ -411,7 +411,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         if (targets.length === 0) {
           engineBusyRef.current = false;
           setReplayHint(
-            '请至少启用一路可多路重放的通道目标（UDP / 视频 UDP）'
+            '请至少启用一路可多路重放的通道目标（UDP / 视频 UDP / TCP / 串口 / MQTT）'
           );
           return;
         }

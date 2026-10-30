@@ -1,6 +1,6 @@
 # 多路重放扩展 sink（E12）
 
-- 状态：已确认（分阶段推进）
+- 状态：已完成（E12a–d）
 - 日期：2026-10-30
 - 依据：E11c/d 已知限制「多路仅 UDP/视频 UDP」；现场多协议同轴对照需串口/TCP/MQTT 也能进 `targets[]`
 
@@ -36,7 +36,7 @@ E11 已打通多通道共享时间轴录制与对齐重放，但多路 `targets[
 - [x] `self-check`：UDP+TCP 同会话对齐重放，两路载荷抽查正确（`self_check_multi_udp_tcp_replay`）
 - [x] 既有多路 UDP 自检与单路 TCP 行为不回归（`self-check` 全部通过）
 
-E12a 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
+E12a 状态：**已完成**（引擎 + 控制面；UI 见 E12d）。
 
 ## E12b 验收
 
@@ -45,7 +45,7 @@ E12a 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 - [x] `self-check`：UDP+串口对齐重放，两路载荷抽查正确（`self_check_multi_udp_serial_replay`，内存环回）
 - [x] 既有多路 UDP/UDP+TCP 与单路串口行为不回归
 
-E12b 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
+E12b 状态：**已完成**（引擎 + 控制面；UI 见 E12d）。
 
 ## E12c 验收
 
@@ -54,7 +54,16 @@ E12b 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。
 - [x] `self-check`：UDP+MQTT 对齐重放，载荷与 topic 抽查正确（`self_check_multi_udp_mqtt_replay`，MiniBroker）
 - [x] 既有多路与单路 MQTT 行为不回归
 
-E12c 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。非目标：mTLS 客户端证书。
+E12c 状态：**已完成**（引擎 + 控制面；UI 见 E12d）。非目标：mTLS 客户端证书。
+
+## E12d 验收
+
+- [x] `isMultiReplayCapable` 含 UDP / 视频 / TCP / 串口 / MQTT（RTSP listen 仍非多路）
+- [x] 多路目标表：按类型展示表单项（UDP/视频 IP:port；TCP host:port；串口口名/波特率/帧格式；MQTT broker/凭据/TLS）
+- [x] 跳过文案与提示同步：未勾选跳过；不再写「多路暂仅 UDP」
+- [x] `listEnabledMultiTargets` 下发与控制面字段对齐（`multiReplayTargets.selfcheck`）
+
+E12d 状态：**已完成**。
 
 ## 非目标（本增强整轮）
 
@@ -64,4 +73,4 @@ E12c 状态：**已完成**（引擎 + 控制面；UI 仍见 E12d）。非目标
 
 ## 建议下一手
 
-E12d UI（放开 capable；串口/TCP/MQTT 目标表单项）。
+备选增强：会话 trim+marker / pcap 导入 / MQTT mTLS / 录制暂停（现场再挑）。

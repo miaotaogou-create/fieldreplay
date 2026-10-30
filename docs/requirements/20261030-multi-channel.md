@@ -67,7 +67,7 @@
 - [x] UI 重演：可为会话内各通道配置目标并一键开始（≥2 通道时下发 `targets[]`；单通道仍走协议页）
 - [x] 进度与完成事件反映整会话（沿用 E11c 统一时间轴 `replay.progress` / `replay.done`；响应可见 `skipped[]`）
 
-已知限制：多路 UI 本阶段仍仅 UDP / 视频 UDP（引擎 E12a–c 已支持 TCP/串口/MQTT；UI 放开见 E12d）。
+已知限制（已由 E12d 解除）：多路 UI 已支持 UDP / 视频 UDP / TCP / 串口 / MQTT 目标表；多路 RTSP listen 仍不支持（请用单路）。
 
 ## 非目标（本增强整轮）
 

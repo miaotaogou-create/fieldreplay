@@ -80,7 +80,7 @@
 | `replay.stop` | 中止重放；响应含 `sent`。自然播完也会推 `replay.done` 并自动回收槽位（`loop:true` 时仅 stop/出错才 done） |
 | `serial.list` | E8a：枚举本机串口名（Windows COM）；响应 `{ "ports": ["COM3", ...] }`；无口为空数组。E8b：可选自检 `FIELDREPLAY_SERIAL_PAIR=COMa,COMb`（未设则跳过）。E8c：打开失败经 `format_open_error` 可读摘要；录制失败推 `record.error`；重放失败时 `replay.done` 带 `error` |
 
-UI：引擎已连接时导出走 `session.export` 下真实二进制；导出弹窗可选同时 `session.exportPcap` 下 `.pcap`；未连接时仍可下载 JSON 离线演示包（pcap 需引擎）。**倍速 / 暂停 / seek / 故障注入 / 循环已接通**（`replay.start.speed`、`pause`/`resume`、`seek`/`fromUs`、`fault`、`loop`）。**多通道**：录制 UI 一键启全部 enabled（E11b）；重演 UI 在会话 ≥2 通道时按通道配目标并下发 `targets[]`（E11d），进度/完成沿整会话时间轴。
+UI：引擎已连接时导出走 `session.export` 下真实二进制；导出弹窗可选同时 `session.exportPcap` 下 `.pcap`；未连接时仍可下载 JSON 离线演示包（pcap 需引擎）。**倍速 / 暂停 / seek / 故障注入 / 循环已接通**（`replay.start.speed`、`pause`/`resume`、`seek`/`fromUs`、`fault`、`loop`）。**多通道**：录制 UI 一键启全部 enabled（E11b）；重演 UI 在会话 ≥2 通道时按通道配目标并下发 `targets[]`（E11d/E12d：UDP/视频 UDP/TCP/串口/MQTT），进度/完成沿整会话时间轴；多路 RTSP listen 仍请用单路。
 
 ## 会话文件
 
