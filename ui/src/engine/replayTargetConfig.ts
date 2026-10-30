@@ -50,16 +50,20 @@ export function replayConfigToEngine(
           port: cfg.tcp.clientTargetPort || 9000,
         },
       };
-    case 'mqtt':
+    case 'mqtt': {
+      const config: Record<string, unknown> = {
+        broker: cfg.mqtt.brokerHost || '127.0.0.1',
+        port: cfg.mqtt.brokerPort || 1883,
+        topic_prefix: cfg.mqtt.topicPrefix || '',
+      };
+      if (cfg.mqtt.username) config.username = cfg.mqtt.username;
+      if (cfg.mqtt.password) config.password = cfg.mqtt.password;
       return {
         type: 'mqtt',
-        config: {
-          broker: cfg.mqtt.brokerHost || '127.0.0.1',
-          port: cfg.mqtt.brokerPort || 1883,
-          topic_prefix: cfg.mqtt.topicPrefix || '',
-        },
+        config,
         topicPrefix: cfg.mqtt.topicPrefix || '',
       };
+    }
     default:
       throw new Error(`不支持的重放目标: ${tab}`);
   }

@@ -82,4 +82,4 @@ cargo run -- self-check
 
 ## 建议下一手
 
-软件工程师：E9a（MQTT username/password）。
+软件工程师：E9a 见 `20261030-mqtt-auth.md`。

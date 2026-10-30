@@ -67,7 +67,13 @@ pub enum Incoming {
     Pingresp,
     Disconnect,
     /// Broker 侧收到的客户端 CONNECT（自检用）
-    Connect { client_id: String, clean_session: bool, keep_alive: u16 },
+    Connect {
+        client_id: String,
+        clean_session: bool,
+        keep_alive: u16,
+        username: Option<String>,
+        password: Option<Vec<u8>>,
+    },
     Subscribe {
         packet_id: u16,
         topics: Vec<(String, u8)>,
@@ -161,7 +167,14 @@ fn wrap(fixed_header: u8, body: &[u8]) -> Vec<u8> {
     out
 }
 
-pub fn encode_connect(client_id: &str, keep_alive_sec: u16, clean_session: bool) -> Vec<u8> {
+/// MQTT 3.1.1 CONNECT。有密码时必须同时带用户名（规范 Password Flag 依赖 Username Flag）。
+pub fn encode_connect(
+    client_id: &str,
+    keep_alive_sec: u16,
+    clean_session: bool,
+    username: Option<&str>,
+    password: Option<&[u8]>,
+) -> Vec<u8> {
     let mut body = Vec::new();
     put_str(&mut body, "MQTT");
     body.push(4); // protocol level 3.1.1
@@ -169,9 +182,25 @@ pub fn encode_connect(client_id: &str, keep_alive_sec: u16, clean_session: bool)
     if clean_session {
         flags |= 0x02;
     }
+    let user = username.filter(|s| !s.is_empty());
+    // 无用户名则不发密码字段
+    let pass = if user.is_some() { password } else { None };
+    if user.is_some() {
+        flags |= 0x80;
+    }
+    if pass.is_some() {
+        flags |= 0x40;
+    }
     body.push(flags);
     put_u16(&mut body, keep_alive_sec);
     put_str(&mut body, client_id);
+    if let Some(u) = user {
+        put_str(&mut body, u);
+    }
+    if let Some(p) = pass {
+        put_u16(&mut body, p.len() as u16);
+        body.extend_from_slice(p);
+    }
     wrap(0x10, &body)
 }
 
@@ -300,10 +329,29 @@ fn decode_body(ty: PacketType, flags: u8, body: &[u8]) -> io::Result<Incoming> {
             let connect_flags = take_bytes(body, &mut off, 1)?[0];
             let keep_alive = take_u16(body, &mut off)?;
             let client_id = take_str(body, &mut off)?;
+            // Will Topic / Will Message（若有）跳过，以便读到 username/password
+            if connect_flags & 0x04 != 0 {
+                let _will_topic = take_str(body, &mut off)?;
+                let will_len = take_u16(body, &mut off)? as usize;
+                let _ = take_bytes(body, &mut off, will_len)?;
+            }
+            let username = if connect_flags & 0x80 != 0 {
+                Some(take_str(body, &mut off)?)
+            } else {
+                None
+            };
+            let password = if connect_flags & 0x40 != 0 {
+                let n = take_u16(body, &mut off)? as usize;
+                Some(take_bytes(body, &mut off, n)?.to_vec())
+            } else {
+                None
+            };
             Ok(Incoming::Connect {
                 client_id,
                 clean_session: connect_flags & 0x02 != 0,
                 keep_alive,
+                username,
+                password,
             })
         }
         PacketType::Connack => {
@@ -434,5 +482,33 @@ mod tests {
         assert!(topic_matches("a/#", "a/b/c"));
         assert!(!topic_matches("a/+/c", "a/b/c/d"));
         assert!(!topic_matches("a/b", "a/x"));
+    }
+
+    #[test]
+    fn connect_with_credentials_roundtrip() {
+        let bytes = encode_connect(
+            "cid-1",
+            60,
+            true,
+            Some("field"),
+            Some(b"s3cret"),
+        );
+        let (n, pkt) = decode_packet(&bytes).unwrap().unwrap();
+        assert_eq!(n, bytes.len());
+        match pkt {
+            Incoming::Connect {
+                client_id,
+                username,
+                password,
+                clean_session,
+                ..
+            } => {
+                assert_eq!(client_id, "cid-1");
+                assert!(clean_session);
+                assert_eq!(username.as_deref(), Some("field"));
+                assert_eq!(password.as_deref(), Some(b"s3cret".as_slice()));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }

@@ -936,6 +936,9 @@ pub struct MqttReplayOptions {
     pub topic_prefix: String,
     /// 发布 QoS：`None` = 用帧 flags 里录到的值。
     pub qos_override: Option<u8>,
+    /// CONNECT 凭据；`None` 时回退到会话通道 config_json（E9a）。
+    pub username: Option<String>,
+    pub password: Option<String>,
     pub poll_timeout: Duration,
     /// 墙钟倍速；1.0=实时。
     pub speed: f64,
@@ -975,12 +978,21 @@ pub fn replay_mqtt_from_file_with(
         })?;
     let recorded_cfg = MqttConfig::from_config_json(&recorded.config_json)?;
 
+    let username = opts
+        .username
+        .clone()
+        .or_else(|| recorded_cfg.username.clone());
+    let password = opts
+        .password
+        .clone()
+        .or_else(|| recorded_cfg.password.clone());
     let config = MqttConfig::new(
         opts.broker.ip().to_string(),
         opts.broker.port(),
         recorded_cfg.topic.clone(),
         recorded_cfg.qos,
-    );
+    )
+    .with_credentials(username, password);
 
     let speed = SessionClock::clamp_speed(opts.speed);
     let fault = opts.fault.clamped();

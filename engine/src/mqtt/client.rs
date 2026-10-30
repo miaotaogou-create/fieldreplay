@@ -31,14 +31,24 @@ impl MqttClient {
             buf: Vec::with_capacity(4096),
             next_packet_id: 1,
         };
-        client.write_all(&encode_connect(&client_id, 60, true))?;
+        let user = config.username.as_deref();
+        let pass = config.password.as_deref().map(|s| s.as_bytes());
+        client.write_all(&encode_connect(&client_id, 60, true, user, pass))?;
         match client.wait_packet(|p| matches!(p, Incoming::Connack { .. }), Duration::from_secs(5))?
         {
             Incoming::Connack { return_code, .. } if return_code == 0 => {}
             Incoming::Connack { return_code, .. } => {
+                let reason = match return_code {
+                    1 => "不可接受的协议版本",
+                    2 => "标识符被拒绝",
+                    3 => "服务器不可用",
+                    4 => "用户名或密码错误",
+                    5 => "未授权",
+                    _ => "未知原因",
+                };
                 return Err(io::Error::new(
                     io::ErrorKind::ConnectionRefused,
-                    format!("MQTT CONNACK 拒绝: return_code={return_code}"),
+                    format!("MQTT CONNACK 拒绝: return_code={return_code} ({reason})"),
                 ));
             }
             _ => unreachable!(),

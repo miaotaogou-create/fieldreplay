@@ -28,6 +28,8 @@ struct Shared {
     clients: HashMap<u64, ClientState>,
     next_id: u64,
     next_packet_id: u16,
+    /// `Some((user, pass))` 时校验 CONNECT；`None` 不鉴权。
+    auth: Option<(String, String)>,
 }
 
 /// 本机迷你 Broker：accept + 轮询已连接客户端，按主题转发 PUBLISH。
@@ -39,6 +41,11 @@ pub struct MiniBroker {
 
 impl MiniBroker {
     pub fn start() -> io::Result<Self> {
+        Self::start_with_auth(None)
+    }
+
+    /// E9a 自检：要求 CONNECT 带匹配的 username/password。
+    pub fn start_with_auth(auth: Option<(String, String)>) -> io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
@@ -48,6 +55,7 @@ impl MiniBroker {
             clients: HashMap::new(),
             next_id: 1,
             next_packet_id: 1,
+            auth,
         }));
         let shared_bg = Arc::clone(&shared);
 
@@ -182,8 +190,35 @@ fn process_one(shared: &Arc<Mutex<Shared>>, id: u64) -> io::Result<()> {
 
 fn handle_packet(shared: &Arc<Mutex<Shared>>, id: u64, pkt: Incoming) -> io::Result<()> {
     match pkt {
-        Incoming::Connect { .. } => {
-            write_to(shared, id, &encode_connack(false, 0))?;
+        Incoming::Connect {
+            username,
+            password,
+            ..
+        } => {
+            let code = {
+                let g = shared.lock().unwrap();
+                match &g.auth {
+                    None => 0u8,
+                    Some((expect_user, expect_pass)) => {
+                        let ok_user = username.as_deref() == Some(expect_user.as_str());
+                        let ok_pass = match &password {
+                            Some(p) => p.as_slice() == expect_pass.as_bytes(),
+                            None => expect_pass.is_empty(),
+                        };
+                        if ok_user && ok_pass {
+                            0
+                        } else {
+                            4 // bad username or password
+                        }
+                    }
+                }
+            };
+            write_to(shared, id, &encode_connack(false, code))?;
+            if code != 0 {
+                // 拒绝后踢掉连接，避免半开客户端占槽
+                let mut g = shared.lock().unwrap();
+                g.clients.remove(&id);
+            }
         }
         Incoming::Subscribe { packet_id, topics } => {
             let mut codes = Vec::new();

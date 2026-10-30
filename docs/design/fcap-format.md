@@ -129,8 +129,17 @@
 **MQTT**
 
 ```json
-{ "broker": "192.168.1.10", "port": 1883, "topic": "factory/line3/#", "qos": 0 }
+{
+  "broker": "192.168.1.10",
+  "port": 1883,
+  "topic": "factory/line3/#",
+  "qos": 0,
+  "username": "field",
+  "password": "secret"
+}
 ```
+
+`username` / `password` 可选（E9a）。缺省时 CONNECT 不带鉴权字段，兼容旧会话。密码属敏感信息，会话文件须按现场规范保管。
 
 **视频（E7a：RTP/UDP；E7c：RTSP）**
 

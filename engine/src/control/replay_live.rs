@@ -367,11 +367,15 @@ fn run_replay(
             } else {
                 topic_prefix.to_string()
             };
+            let username = extract_str(config, "username").filter(|s| !s.is_empty());
+            let password = extract_str(config, "password").filter(|s| !s.is_empty());
             let opts = MqttReplayOptions {
                 in_path: in_path.to_path_buf(),
                 broker,
                 topic_prefix: prefix,
                 qos_override: None,
+                username,
+                password,
                 poll_timeout: poll,
                 speed,
                 fault,

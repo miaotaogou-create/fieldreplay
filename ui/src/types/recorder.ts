@@ -27,6 +27,8 @@ export interface ChannelConfig {
     mqttTopic?: string;
     mqttBroker?: string;
     mqttQoS?: 0 | 1 | 2;
+    mqttUsername?: string;
+    mqttPassword?: string;
   };
   // Status
   connected: boolean;
@@ -111,6 +113,10 @@ export interface ReplayConfig {
     brokerHost: string; // 127.0.0.1
     brokerPort: number; // 1883
     topicPrefix: string;
+    /** E9a：可选 CONNECT 用户名 */
+    username: string;
+    /** E9a：可选 CONNECT 密码 */
+    password: string;
     connectedToBroker: boolean;
   };
   simulateOutput: boolean; // True to physically send via WebSockets / local agent

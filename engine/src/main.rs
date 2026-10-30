@@ -61,20 +61,22 @@ FieldReplay 引擎（E5a：录放 + 本地 WebSocket 控制面）
   fieldreplay-engine record  --tcp-role <server|client> --tcp <ip:port> --out <file.fcap> \\
                              [--duration <秒>]
   fieldreplay-engine record  --mqtt <host:port> --topic <filter> [--qos 0|1|2] \\
+                             [--mqtt-user <u>] [--mqtt-password <p>] \\
                              --out <file.fcap> [--duration <秒>]
   fieldreplay-engine record  --rtsp <rtsp://host[:port]/path> --out <file.fcap> [--duration <秒>]
   fieldreplay-engine replay  --in <file.fcap> --target <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --rtsp-listen <ip:port>
   fieldreplay-engine replay  --in <file.fcap> --port <COMx> [--baud <n>] ...
   fieldreplay-engine replay  --in <file.fcap> --tcp <ip:port>
-  fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>]
+  fieldreplay-engine replay  --in <file.fcap> --mqtt <host:port> [--topic-prefix <前缀>] \\
+                             [--mqtt-user <u>] [--mqtt-password <p>]
   fieldreplay-engine serve   [--bind 127.0.0.1:17890] [--ui-dir <ui/dist>]
   fieldreplay-engine self-check
 
 record：无 --duration 时按 Enter 停止并收尾写盘。
 --bind / --port / --tcp / --mqtt / --rtsp 互斥；replay 的 --target / --rtsp-listen / --port / --tcp / --mqtt 互斥。
 TCP 重放：按文件内录制角色自动取反（server↔client），--tcp 为重放侧地址。
-MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）。
+MQTT：录=订阅；放=按时间轴发布（topic 存 aux；可选 --topic-prefix）；可选 --mqtt-user/--mqtt-password（E9a）。
 RTSP：录=交织 TCP 拉流（E7c）；重放 --rtsp-listen 作服务端按时间轴吐块（E7d；不解 NAL）。
 serve：本机 WebSocket 控制面；可选 --ui-dir 同端口托管静态 UI（E6a；交付壳用）。
 "
@@ -125,6 +127,8 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut mqtt_endpoint: Option<SocketAddr> = None;
     let mut mqtt_topic: Option<String> = None;
     let mut mqtt_qos: u8 = 0;
+    let mut mqtt_user: Option<String> = None;
+    let mut mqtt_password: Option<String> = None;
     let mut rtsp_url: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -182,6 +186,18 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                     .ok()
                     .filter(|q| *q <= 2)
                     .ok_or_else(|| err_arg("--qos 须为 0|1|2"))?;
+            }
+            "--mqtt-user" => {
+                mqtt_user = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-user 需要用户名"))?,
+                );
+            }
+            "--mqtt-password" => {
+                mqtt_password = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-password 需要密码"))?,
+                );
             }
             "--rtsp" => {
                 rtsp_url = Some(
@@ -300,7 +316,8 @@ fn cmd_record(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             endpoint.port(),
             topic.clone(),
             mqtt_qos,
-        );
+        )
+        .with_credentials(mqtt_user, mqtt_password);
         let opts = MqttRecordOptions {
             config,
             out_path: out,
@@ -359,6 +376,8 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
     let mut tcp_endpoint: Option<SocketAddr> = None;
     let mut mqtt_endpoint: Option<SocketAddr> = None;
     let mut topic_prefix = String::new();
+    let mut mqtt_user: Option<String> = None;
+    let mut mqtt_password: Option<String> = None;
     let mut port_name: Option<String> = None;
     let mut baud: u32 = 115_200;
     let mut data_bits: u8 = 8;
@@ -405,6 +424,18 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
                 topic_prefix = args
                     .next()
                     .ok_or_else(|| err_arg("--topic-prefix 需要前缀"))?;
+            }
+            "--mqtt-user" => {
+                mqtt_user = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-user 需要用户名"))?,
+                );
+            }
+            "--mqtt-password" => {
+                mqtt_password = Some(
+                    args.next()
+                        .ok_or_else(|| err_arg("--mqtt-password 需要密码"))?,
+                );
             }
             "--port" => {
                 port_name = Some(
@@ -509,6 +540,8 @@ fn cmd_replay(mut args: impl Iterator<Item = String>) -> io::Result<()> {
             broker: endpoint,
             topic_prefix,
             qos_override: None,
+            username: mqtt_user,
+            password: mqtt_password,
             poll_timeout: Duration::from_millis(200),
             speed: 1.0,
             fault: FaultInjection::OFF,
@@ -685,6 +718,11 @@ fn cmd_self_check() -> io::Result<()> {
     print!("self-check: MQTT 订阅录 / 发布放… ");
     let _ = io::stdout().flush();
     mqtt_loopback_check()?;
+    println!("ok");
+
+    print!("self-check: MQTT 用户名密码鉴权… ");
+    let _ = io::stdout().flush();
+    mqtt_auth_check()?;
     println!("ok");
 
     print!("self-check: 控制面 WebSocket… ");
@@ -1620,10 +1658,12 @@ fn mqtt_loopback_check() -> io::Result<()> {
         broker: addr,
         topic_prefix: String::new(),
         qos_override: Some(0),
+        username: None,
+        password: None,
         poll_timeout: Duration::from_millis(50),
         speed: 1.0,
         fault: FaultInjection::OFF,
-            looping: false,
+        looping: false,
     })?;
     listen_stop.store(true, Ordering::SeqCst);
     let got = collector
@@ -1650,6 +1690,42 @@ fn mqtt_loopback_check() -> io::Result<()> {
             format!("MQTT topic 不一致: {got:?}"),
         ));
     }
+    Ok(())
+}
+
+/// E9a：鉴权 Broker 接受正确凭据、拒绝错误凭据。
+fn mqtt_auth_check() -> io::Result<()> {
+    let broker = MiniBroker::start_with_auth(Some(("field".into(), "s3cret".into())))?;
+    let addr = broker.addr();
+    std::thread::sleep(Duration::from_millis(40));
+
+    let bad = MqttConfig::new(addr.ip().to_string(), addr.port(), "t", 0)
+        .with_credentials(Some("field".into()), Some("wrong".into()));
+    match MqttClient::connect(&bad, Duration::from_millis(200)) {
+        Err(e) => {
+            let msg = e.to_string();
+            if !msg.contains("return_code=4") && !msg.contains("用户名或密码") {
+                broker.stop();
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("错误凭据应被 CONNACK 4 拒绝，实际: {msg}"),
+                ));
+            }
+        }
+        Ok(_) => {
+            broker.stop();
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "错误凭据不应连上鉴权 Broker",
+            ));
+        }
+    }
+
+    let good = MqttConfig::new(addr.ip().to_string(), addr.port(), "t", 0)
+        .with_credentials(Some("field".into()), Some("s3cret".into()));
+    let client = MqttClient::connect(&good, Duration::from_millis(200))?;
+    let _ = client.disconnect();
+    broker.stop();
     Ok(())
 }
 

@@ -37,6 +37,10 @@ pub struct MqttConfig {
     pub port: u16,
     pub topic: String,
     pub qos: u8,
+    /// CONNECT Username（可选，E9a）
+    pub username: Option<String>,
+    /// CONNECT Password（可选；无 username 时忽略）
+    pub password: Option<String>,
 }
 
 impl MqttConfig {
@@ -46,18 +50,39 @@ impl MqttConfig {
             port,
             topic: topic.into(),
             qos: qos.min(2),
+            username: None,
+            password: None,
         }
+    }
+
+    pub fn with_credentials(
+        mut self,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Self {
+        self.username = username.filter(|s| !s.is_empty());
+        self.password = password.filter(|s| !s.is_empty());
+        if self.username.is_none() {
+            self.password = None;
+        }
+        self
     }
 
     /// 与 `docs/design/fcap-format.md` MQTT `config_json` 对齐。
     pub fn to_config_json(&self) -> String {
-        format!(
-            r#"{{"broker":"{}","port":{},"topic":"{}","qos":{}}}"#,
-            escape_json_str(&self.broker),
-            self.port,
-            escape_json_str(&self.topic),
-            self.qos
-        )
+        let mut parts = vec![
+            format!(r#""broker":"{}""#, escape_json_str(&self.broker)),
+            format!(r#""port":{}"#, self.port),
+            format!(r#""topic":"{}""#, escape_json_str(&self.topic)),
+            format!(r#""qos":{}"#, self.qos),
+        ];
+        if let Some(u) = &self.username {
+            parts.push(format!(r#""username":"{}""#, escape_json_str(u)));
+        }
+        if let Some(p) = &self.password {
+            parts.push(format!(r#""password":"{}""#, escape_json_str(p)));
+        }
+        format!("{{{}}}", parts.join(","))
     }
 
     pub fn from_config_json(s: &str) -> io::Result<Self> {
@@ -68,11 +93,15 @@ impl MqttConfig {
         }
         let topic = extract_json_str(s, "topic").unwrap_or_else(|| "#".into());
         let qos = extract_json_u64(s, "qos").unwrap_or(0).min(2) as u8;
+        let username = extract_json_str(s, "username").filter(|s| !s.is_empty());
+        let password = extract_json_str(s, "password").filter(|s| !s.is_empty());
         Ok(Self {
             broker,
             port: port as u16,
             topic,
             qos,
+            username: username.clone(),
+            password: if username.is_some() { password } else { None },
         })
     }
 
@@ -144,12 +173,25 @@ mod tests {
 
     #[test]
     fn config_json_roundtrip() {
-        let cfg = MqttConfig::new("192.168.1.10", 1883, "factory/line3/#", 1);
+        let cfg = MqttConfig::new("192.168.1.10", 1883, "factory/line3/#", 1)
+            .with_credentials(Some("field".into()), Some("s3cret".into()));
         let parsed = MqttConfig::from_config_json(&cfg.to_config_json()).unwrap();
         assert_eq!(parsed.broker, "192.168.1.10");
         assert_eq!(parsed.port, 1883);
         assert_eq!(parsed.topic, "factory/line3/#");
         assert_eq!(parsed.qos, 1);
+        assert_eq!(parsed.username.as_deref(), Some("field"));
+        assert_eq!(parsed.password.as_deref(), Some("s3cret"));
+    }
+
+    #[test]
+    fn config_json_legacy_without_credentials() {
+        let parsed = MqttConfig::from_config_json(
+            r##"{"broker":"127.0.0.1","port":1883,"topic":"#","qos":0}"##,
+        )
+        .unwrap();
+        assert!(parsed.username.is_none());
+        assert!(parsed.password.is_none());
     }
 
     #[test]

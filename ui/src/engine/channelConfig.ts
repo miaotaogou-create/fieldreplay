@@ -34,12 +34,15 @@ export function channelToEngineConfig(ch: ChannelConfig): Record<string, unknown
       const [host, portStr] = brokerRaw.includes(':')
         ? brokerRaw.split(':')
         : [brokerRaw, '1883'];
-      return {
+      const cfg: Record<string, unknown> = {
         broker: host || '127.0.0.1',
         port: Number(portStr) || 1883,
         topic: ch.params.mqttTopic || '#',
         qos: ch.params.mqttQoS ?? 0,
       };
+      if (ch.params.mqttUsername) cfg.username = ch.params.mqttUsername;
+      if (ch.params.mqttPassword) cfg.password = ch.params.mqttPassword;
+      return cfg;
     }
     case 'video_stream': {
       const rtsp = (ch.params.streamUrl || '').trim();

@@ -296,6 +296,12 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         mqttBroker: isMqtt ? (newChanParam.split(',')[0]?.trim() || '127.0.0.1:1883') : undefined,
         mqttTopic: isMqtt ? (newChanParam.split(',')[1]?.trim() || 'factory/+/telemetry') : undefined,
         mqttQoS: isMqtt ? 1 : undefined,
+        mqttUsername: isMqtt
+          ? (newChanParam.split(',')[2]?.trim() || undefined)
+          : undefined,
+        mqttPassword: isMqtt
+          ? (newChanParam.split(',')[3]?.trim() || undefined)
+          : undefined,
       },
       connected: true,
       rxBytes: 0,
@@ -910,7 +916,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 {newChanType === 'serial'
                   ? '串口参数'
                   : newChanType === 'mqtt'
-                  ? 'Broker 与 Topic'
+                  ? 'Broker、Topic、可选用户名/密码'
                   : newChanType === 'video_stream'
                   ? 'RTP/UDP 监听或 RTSP URL（不解编码）'
                   : '监听地址'}
@@ -959,7 +965,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   newChanType === 'serial'
                     ? 'COM4, 921600, 8-N-1'
                     : newChanType === 'mqtt'
-                    ? '127.0.0.1:1883, factory/+/telemetry'
+                    ? '127.0.0.1:1883, factory/+/telemetry[, user, pass]'
                     : newChanType === 'video_stream'
                     ? '0.0.0.0:5004 或 rtsp://host:554/live'
                     : '0.0.0.0:8888'

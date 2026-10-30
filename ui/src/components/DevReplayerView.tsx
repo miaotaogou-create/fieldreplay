@@ -119,6 +119,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       brokerHost: '127.0.0.1',
       brokerPort: 1883,
       topicPrefix: '',
+      username: '',
+      password: '',
       connectedToBroker: true,
     },
     simulateOutput: true,
@@ -1012,6 +1014,40 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                       })
                     }
                     placeholder="留空=原 Topic"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-600 text-[11px] shrink-0">用户名:</span>
+                  <input
+                    type="text"
+                    value={replayConfig.mqtt.username}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        mqtt: { ...replayConfig.mqtt, username: e.target.value },
+                      })
+                    }
+                    placeholder="可选"
+                    autoComplete="off"
+                    className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-600 text-[11px] shrink-0">密码:</span>
+                  <input
+                    type="password"
+                    value={replayConfig.mqtt.password}
+                    onChange={(e) =>
+                      setReplayConfig({
+                        ...replayConfig,
+                        mqtt: { ...replayConfig.mqtt, password: e.target.value },
+                      })
+                    }
+                    placeholder="可选"
+                    autoComplete="off"
                     className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 font-mono"
                   />
                 </div>
