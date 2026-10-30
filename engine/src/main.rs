@@ -1237,16 +1237,8 @@ fn serial_hw_pair_check(port_a: &str, port_b: &str) -> io::Result<()> {
     let stop_rec = Arc::clone(&stop);
 
     let cfg_a = SerialConfig::new(port_a, BAUD);
-    let end_rec = SerialPort::open(&cfg_a, Duration::from_millis(50)).map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("打开录制口 {port_a} 失败: {e}"),
-        )
-    })?;
-    let end_inj = SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(50))
-        .map_err(|e| {
-            io::Error::new(e.kind(), format!("打开灌数口 {port_b} 失败: {e}"))
-        })?;
+    let end_rec = SerialPort::open(&cfg_a, Duration::from_millis(50))?;
+    let end_inj = SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(50))?;
 
     let recorder = thread::spawn(move || {
         let opts = SerialRecordOptions {
@@ -1277,14 +1269,9 @@ fn serial_hw_pair_check(port_a: &str, port_b: &str) -> io::Result<()> {
         ));
     }
 
-    let end_play = SerialPort::open(&SerialConfig::new(port_a, BAUD), Duration::from_millis(200))
-        .map_err(|e| {
-            io::Error::new(e.kind(), format!("打开重放口 {port_a} 失败: {e}"))
-        })?;
+    let end_play = SerialPort::open(&SerialConfig::new(port_a, BAUD), Duration::from_millis(200))?;
     let end_listen =
-        SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(200)).map_err(
-            |e| io::Error::new(e.kind(), format!("打开监听口 {port_b} 失败: {e}")),
-        )?;
+        SerialPort::open(&SerialConfig::new(port_b, BAUD), Duration::from_millis(200))?;
 
     let listener = thread::spawn(move || -> io::Result<Vec<Vec<u8>>> {
         let mut out = Vec::new();

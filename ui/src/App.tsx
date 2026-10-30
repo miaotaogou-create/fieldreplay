@@ -148,11 +148,15 @@ export default function App() {
           durationUs: 0,
         });
         setEngineReplayDoneSeq((n) => n + 1);
-        toastFnRef.current(
-          ev.stopped
-            ? `重放已停止（已发 ${ev.sent ?? 0} 帧）`
-            : `重放完成（已发 ${ev.sent ?? 0} 帧）`
-        );
+        if (ev.error) {
+          toastFnRef.current(`重放失败：${ev.error}`);
+        } else {
+          toastFnRef.current(
+            ev.stopped
+              ? `重放已停止（已发 ${ev.sent ?? 0} 帧）`
+              : `重放完成（已发 ${ev.sent ?? 0} 帧）`
+          );
+        }
       }
     };
     client.start();

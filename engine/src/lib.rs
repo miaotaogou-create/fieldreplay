@@ -38,7 +38,7 @@ pub use replay::{
     RtspReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
 pub use serial::{
-    list_ports, parse_serial_pair, serial_pair_from_env, Parity, SerialConfig, SerialPort,
-    SERIAL_PAIR_ENV,
+    format_open_error, list_ports, parse_serial_pair, serial_pair_from_env, Parity, SerialConfig,
+    SerialPort, SERIAL_PAIR_ENV,
 };
 pub use tcp::{TcpConfig, TcpRole};

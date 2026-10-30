@@ -16,6 +16,10 @@ import {
   createMqttPacket,
 } from '../utils/mockFieldData';
 import {
+  formatSerialLineSummary,
+  parseSerialParamLine,
+} from '../utils/serialParams';
+import {
   Play,
   Square,
   Pause,
@@ -96,8 +100,11 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     try {
       const ports = await onListSerialPorts();
       setSerialPorts(ports.length ? ports : [...FALLBACK_SERIAL_PORTS]);
+      const parsed = parseSerialParamLine(newChanParam);
       setSerialListHint(
-        ports.length === 0 ? '本机未枚举到 COM，已用兜底列表' : `本机 ${ports.length} 个串口`
+        ports.length === 0
+          ? `本机未枚举到 COM，已用兜底列表 · 当前 ${parsed.portName} @ ${formatSerialLineSummary(parsed)}`
+          : `本机 ${ports.length} 个串口 · 当前 ${parsed.portName} @ ${formatSerialLineSummary(parsed)}`
       );
     } catch (e) {
       setSerialListHint(e instanceof Error ? e.message : String(e));
@@ -270,6 +277,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       : [isVideo ? '0.0.0.0' : '127.0.0.1', newChanParam];
     const listenIp = hostPort[0]?.trim() || (isVideo ? '0.0.0.0' : '127.0.0.1');
     const listenPort = Number(hostPort[1]?.trim()) || (isVideo ? 5004 : 8888);
+    const serialParsed = isSerial ? parseSerialParamLine(newChanParam) : null;
     const newChan: ChannelConfig = {
       id: `ch_custom_${Date.now()}`,
       name: newChanName,
@@ -277,8 +285,11 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       enabled: true,
       color: isVideo ? '#7c3aed' : isMqtt ? '#0d9488' : '#0891b2',
       params: {
-        portName: isSerial ? newChanParam.split(',')[0]?.trim() || 'COM4' : undefined,
-        baudRate: isSerial ? 921600 : undefined,
+        portName: serialParsed?.portName,
+        baudRate: serialParsed?.baudRate,
+        dataBits: serialParsed?.dataBits,
+        stopBits: serialParsed?.stopBits,
+        parity: serialParsed?.parity,
         ip: !isSerial && !isMqtt ? (isRtsp ? '0.0.0.0' : listenIp) : undefined,
         port: !isSerial && !isMqtt ? (isRtsp ? 0 : listenPort) : undefined,
         streamUrl: isRtsp ? paramTrim : undefined,
@@ -426,7 +437,8 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 </div>
 
                 <div className="text-[10px] text-slate-500 font-mono pl-5 truncate">
-                  {chan.type === 'serial' && `${chan.params.portName ?? 'COM'} · ${chan.params.baudRate ?? 115200}bps`}
+                  {chan.type === 'serial' &&
+                    `${chan.params.portName ?? 'COM'} · ${formatSerialLineSummary(chan.params)}`}
                   {chan.type === 'udp' && `UDP :${chan.params.port ?? 8080}`}
                   {chan.type === 'tcp' && `TCP :${chan.params.port ?? 9000} (${chan.params.role ?? 'svr'})`}
                   {chan.type === 'mqtt' && `MQTT ${chan.params.mqttTopic ?? '#'}`}

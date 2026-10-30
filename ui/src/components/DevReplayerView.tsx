@@ -10,6 +10,7 @@ import {
   ReplayConfig,
 } from '../types/recorder';
 import { ReplayTargetType } from '../engine/replayTargetConfig';
+import { formatSerialLineSummary } from '../utils/serialParams';
 import {
   Play,
   Pause,
@@ -99,6 +100,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       selectedPort: 'COM2',
       hostComPort: 'COM1',
       baudRate: 115200,
+      dataBits: 8,
+      stopBits: 1,
+      parity: 'none',
       isPortOpen: true,
       availablePorts: [...FALLBACK_SERIAL_PORTS],
     },
@@ -177,8 +181,12 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           },
         };
       });
+      const summary = formatSerialLineSummary(replayConfig.serial);
+      const port = replayConfig.serial.selectedPort;
       setSerialListHint(
-        ports.length === 0 ? '本机未枚举到 COM，已保留兜底/当前选项' : `已刷新 ${ports.length} 个串口`
+        ports.length === 0
+          ? `本机未枚举到 COM，已保留兜底/当前选项 · ${port} @ ${summary}`
+          : `已刷新 ${ports.length} 个串口 · ${port} @ ${summary}`
       );
     } catch (e) {
       setSerialListHint(e instanceof Error ? e.message : String(e));
@@ -1185,29 +1193,56 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                    波特率:
-                  </label>
-                  <select
-                    value={replayConfig.serial.baudRate}
-                    onChange={(e) =>
-                      setReplayConfig({
-                        ...replayConfig,
-                        serial: {
-                          ...replayConfig.serial,
-                          baudRate: parseInt(e.target.value) || 115200,
-                        },
-                      })
-                    }
-                    className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-900 font-mono focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  >
-                    {[9600, 19200, 38400, 57600, 115200, 460800, 921600].map((b) => (
-                      <option key={b} value={b}>
-                        {b} bps (8-N-1)
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-1.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      波特率:
+                    </label>
+                    <select
+                      value={replayConfig.serial.baudRate}
+                      onChange={(e) =>
+                        setReplayConfig({
+                          ...replayConfig,
+                          serial: {
+                            ...replayConfig.serial,
+                            baudRate: parseInt(e.target.value) || 115200,
+                          },
+                        })
+                      }
+                      className="w-full bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-900 font-mono focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    >
+                      {[9600, 19200, 38400, 57600, 115200, 460800, 921600].map((b) => (
+                        <option key={b} value={b}>
+                          {b} bps
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[11px] font-semibold text-slate-700 shrink-0">
+                      校验:
+                    </label>
+                    <select
+                      value={replayConfig.serial.parity || 'none'}
+                      onChange={(e) =>
+                        setReplayConfig({
+                          ...replayConfig,
+                          serial: {
+                            ...replayConfig.serial,
+                            parity: e.target.value as 'none' | 'even' | 'odd',
+                          },
+                        })
+                      }
+                      className="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-900 font-mono focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    >
+                      <option value="none">None</option>
+                      <option value="even">Even</option>
+                      <option value="odd">Odd</option>
+                    </select>
+                    <span className="text-[10px] text-slate-500 font-mono shrink-0">
+                      {formatSerialLineSummary(replayConfig.serial)}
+                    </span>
+                  </div>
                 </div>
               </div>
 

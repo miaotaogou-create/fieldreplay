@@ -116,22 +116,49 @@ pub struct SerialPort {
     inner: PortInner,
 }
 
+/// 将打开串口失败的系统错误整理成可读摘要（含口名与常见 Win32 含义）。
+pub fn format_open_error(port_name: &str, err: &io::Error) -> String {
+    let hint = match err.raw_os_error() {
+        Some(2) | Some(3) => "口不存在或驱动未就绪",
+        Some(5) => "无权限或口被占用",
+        Some(32) => "口正被其他程序占用",
+        Some(31) => "设备未就绪或参数不被支持",
+        Some(87) => "波特率/校验等位参数无效",
+        Some(123) => "口名无效",
+        _ => "",
+    };
+    let os = match err.raw_os_error() {
+        Some(code) => format!("（系统错误 {code}）"),
+        None => String::new(),
+    };
+    if hint.is_empty() {
+        format!("打开串口 {port_name} 失败：{err}{os}")
+    } else {
+        format!("打开串口 {port_name} 失败：{hint}{os}；{err}")
+    }
+}
+
 impl SerialPort {
     /// 打开本机串口（Windows）。`port_name` 如 `COM3` / `COM10`。
     pub fn open(cfg: &SerialConfig, read_timeout: Duration) -> io::Result<Self> {
         #[cfg(windows)]
         {
-            let win = win::WinPort::open(cfg, read_timeout)?;
+            let win = win::WinPort::open(cfg, read_timeout).map_err(|e| {
+                io::Error::new(e.kind(), format_open_error(&cfg.port_name, &e))
+            })?;
             return Ok(Self {
                 inner: PortInner::Win(win),
             });
         }
         #[cfg(not(windows))]
         {
-            let _ = (cfg, read_timeout);
+            let _ = read_timeout;
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "串口实口目前仅支持 Windows",
+                format!(
+                    "打开串口 {} 失败：串口实口目前仅支持 Windows",
+                    cfg.port_name
+                ),
             ))
         }
     }
@@ -599,5 +626,18 @@ mod tests {
         assert!(parse_serial_pair("COM3,COM3").is_err());
         assert!(parse_serial_pair("COM3, COM3 ").is_err());
         assert!(parse_serial_pair("").is_err());
+    }
+
+    #[test]
+    fn format_open_error_maps_common_codes() {
+        let missing = io::Error::from_raw_os_error(2);
+        let msg = format_open_error("COM99", &missing);
+        assert!(msg.contains("COM99"), "{msg}");
+        assert!(msg.contains("口不存在") || msg.contains("驱动"), "{msg}");
+        assert!(msg.contains("2"), "{msg}");
+
+        let busy = io::Error::from_raw_os_error(5);
+        let msg = format_open_error("COM3", &busy);
+        assert!(msg.contains("占用") || msg.contains("权限"), "{msg}");
     }
 }

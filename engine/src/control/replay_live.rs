@@ -113,10 +113,17 @@ pub fn handle_replay_start(
         );
         let sent = sent_c.load(Ordering::SeqCst);
         let stopped = stop_c.load(Ordering::SeqCst);
-        let done = format!(
-            "{{\"event\":\"replay.done\",\"sent\":{sent},\"stopped\":{}}}",
-            if stopped { "true" } else { "false" }
-        );
+        let done = match &result {
+            Ok(_) => format!(
+                "{{\"event\":\"replay.done\",\"sent\":{sent},\"stopped\":{}}}",
+                if stopped { "true" } else { "false" }
+            ),
+            Err(e) => format!(
+                "{{\"event\":\"replay.done\",\"sent\":{sent},\"stopped\":{},\"error\":\"{}\"}}",
+                if stopped { "true" } else { "false" },
+                escape_str(&e.to_string())
+            ),
+        };
         hub_c.broadcast(&done);
         finished_c.store(true, Ordering::SeqCst);
         result

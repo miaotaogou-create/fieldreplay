@@ -89,6 +89,9 @@ export interface ReplayConfig {
     /** 上位机侧读取的配对口（如 COM1）；仅 UI 提示，引擎写 selectedPort */
     hostComPort: string;
     baudRate: number;
+    dataBits?: 7 | 8;
+    stopBits?: 1 | 2;
+    parity?: 'none' | 'even' | 'odd';
     isPortOpen: boolean;
     availablePorts: string[];
   };

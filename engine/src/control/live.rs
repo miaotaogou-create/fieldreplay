@@ -61,7 +61,7 @@ pub fn handle_record_start(
     let config_c = config_raw.clone();
 
     let join = thread::spawn(move || {
-        run_record(
+        let result = run_record(
             &ty_c,
             &config_c,
             &out_c,
@@ -70,7 +70,15 @@ pub fn handle_record_start(
             &stop_c,
             &count_c,
             &hub_c,
-        )
+        );
+        // 打开失败等会立刻推到 UI，不必等 record.stop
+        if let Err(ref e) = result {
+            hub_c.broadcast(&format!(
+                "{{\"event\":\"record.error\",\"error\":\"{}\"}}",
+                escape_str(&e.to_string())
+            ));
+        }
+        result
     });
 
     let channel_json = format!(

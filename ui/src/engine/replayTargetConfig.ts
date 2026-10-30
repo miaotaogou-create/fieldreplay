@@ -27,9 +27,9 @@ export function replayConfigToEngine(
         config: {
           port_name: cfg.serial.selectedPort || cfg.virtualComPort || 'COM2',
           baud: cfg.serial.baudRate || 115200,
-          data_bits: 8,
-          stop_bits: 1,
-          parity: 'none',
+          data_bits: cfg.serial.dataBits ?? 8,
+          stop_bits: cfg.serial.stopBits ?? 1,
+          parity: cfg.serial.parity || 'none',
         },
       };
     case 'tcp':

@@ -58,7 +58,7 @@ fieldreplay-engine replay --in session.fcap --mqtt 127.0.0.1:1883 --topic-prefix
 | `fcap` | `.fcap` v1 头 / 通道表 / 帧 写读 |
 | `clock` | 录制相对微秒、重放等待 |
 | `udp` | bind 收 / 发；录制侧放大 SO_RCVBUF |
-| `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
+| `serial` | Windows 实口 Win32；`list_ports` 枚举 COM；打开失败可读摘要；自检内存环回；可选 `FIELDREPLAY_SERIAL_PAIR` 实口对 |
 | `tcp` | 角色 server/client；连接事件 + 字节流 |
 | `mqtt` | 最小 MQTT 3.1.1 客户端；自检迷你 Broker |
 | `record` / `replay` | UDP / 串口 / TCP / MQTT 会话闭环 |
