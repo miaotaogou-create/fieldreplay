@@ -543,6 +543,8 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_record_pause_via_ws(&mut client)?;
     // E16d：多路共享轴 + 暂停期无推送/无落盘
     self_check_record_pause_multi_via_ws(&mut client)?;
+    // R2b：控制面 multi targets[]（UDP+TCP）环回
+    self_check_replay_multi_targets_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
     Ok(())
@@ -2075,6 +2077,232 @@ fn self_check_record_pause_multi_via_ws(client: &mut TcpStream) -> io::Result<()
     }
 
     eprintln!("  控制面多路 record.pause/resume（无推送/无落盘）：通过");
+    Ok(())
+}
+
+/// R2b：控制面 `replay.start` 非空 `targets[]`（UDP+TCP）环回收到载荷。
+fn self_check_replay_multi_targets_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    use crate::tcp::{TcpConfig, TcpRole};
+
+    let dir = std::env::temp_dir().join("fieldreplay_r2b_multi_targets");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("multi.fcap");
+    let _ = std::fs::remove_file(&path);
+
+    let tcp_rec = TcpConfig::new(TcpRole::Server, "127.0.0.1", 19001);
+    let channels = [
+        ChannelEntry {
+            channel_index: 0,
+            channel_type: ChannelType::Udp,
+            name: "u0".into(),
+            config_json: r#"{"bind_ip":"127.0.0.1","bind_port":19000}"#.into(),
+        },
+        ChannelEntry {
+            channel_index: 1,
+            channel_type: ChannelType::Tcp,
+            name: "t0".into(),
+            config_json: tcp_rec.to_config_json(),
+        },
+    ];
+    {
+        let mut w = SessionWriter::create(&path, 1_700_000_000_000_000, &channels, None)?;
+        w.append_packet(&PacketRecord {
+            relative_us: 1_000,
+            channel_index: 0,
+            kind: PacketKind::Data,
+            direction: 0,
+            flags: 0,
+            aux: b"127.0.0.1:1".to_vec(),
+            payload: b"RU1".to_vec(),
+        })?;
+        w.append_packet(&PacketRecord {
+            relative_us: 2_000,
+            channel_index: 1,
+            kind: PacketKind::TcpConnect,
+            direction: 0,
+            flags: 0,
+            aux: b"127.0.0.1:2".to_vec(),
+            payload: Vec::new(),
+        })?;
+        w.append_packet(&PacketRecord {
+            relative_us: 3_000,
+            channel_index: 1,
+            kind: PacketKind::Data,
+            direction: 0,
+            flags: 0,
+            aux: Vec::new(),
+            payload: b"RT1".to_vec(),
+        })?;
+        w.append_packet(&PacketRecord {
+            relative_us: 4_000,
+            channel_index: 0,
+            kind: PacketKind::Data,
+            direction: 0,
+            flags: 0,
+            aux: b"127.0.0.1:1".to_vec(),
+            payload: b"RU2".to_vec(),
+        })?;
+        w.append_packet(&PacketRecord {
+            relative_us: 5_000,
+            channel_index: 1,
+            kind: PacketKind::Data,
+            direction: 0,
+            flags: 0,
+            aux: Vec::new(),
+            payload: b"RT2".to_vec(),
+        })?;
+        w.finalize()?;
+    }
+
+    let open = format!(
+        r#"{{"id":"r2b-0","cmd":"session.open","path":"{}"}}"#,
+        escape_path_for_json(&path)
+    );
+    write_text_frame_client(client, &open)?;
+    let opened = drain_until_id(client, "r2b-0")?;
+    if !opened.contains("\"ok\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("r2b session.open 失败: {opened}"),
+        ));
+    }
+
+    let udp_rx = UdpSocket::bind("127.0.0.1:0")?;
+    udp_rx.set_read_timeout(Some(Duration::from_millis(800)))?;
+    let udp_addr = udp_rx.local_addr()?;
+
+    let tcp_listener = TcpListener::bind("127.0.0.1:0")?;
+    let tcp_addr = tcp_listener.local_addr()?;
+    let tcp_got = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let tcp_got_c = Arc::clone(&tcp_got);
+    let acceptor = thread::spawn(move || -> io::Result<()> {
+        tcp_listener.set_nonblocking(false)?;
+        let (mut stream, _) = tcp_listener.accept()?;
+        stream.set_read_timeout(Some(Duration::from_millis(1500)))?;
+        let mut buf = [0u8; 256];
+        let mut acc = Vec::new();
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => acc.extend_from_slice(&buf[..n]),
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || e.kind() == io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
+            if acc.len() >= 6 {
+                break;
+            }
+        }
+        *tcp_got_c
+            .lock()
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "tcp_got 锁中毒"))? = acc;
+        Ok(())
+    });
+
+    let mut start = String::from(
+        r#"{"id":"r2b-1","cmd":"replay.start","speed":50,"targets":["#,
+    );
+    start.push_str(&format!(
+        r#"{{"ch":0,"type":"udp","config":{{"target_ip":"127.0.0.1","target_port":{}}}}}"#,
+        udp_addr.port()
+    ));
+    start.push(',');
+    start.push_str(&format!(
+        r#"{{"ch":1,"type":"tcp","config":{{"host":"127.0.0.1","port":{}}}}}"#,
+        tcp_addr.port()
+    ));
+    start.push_str("]}");
+
+    write_text_frame_client(client, &start)?;
+    let started = drain_until_id(client, "r2b-1")?;
+    if !started.contains("\"ok\":true")
+        || !started.contains("\"started\":true")
+        || !started.contains("\"targets\"")
+    {
+        let _ = write_text_frame_client(client, r#"{"id":"r2b-x","cmd":"replay.stop"}"#);
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("r2b replay.start targets[] 失败: {started}"),
+        ));
+    }
+
+    // 等 replay.done 或超时后再 stop
+    let mut saw_done = false;
+    client.set_read_timeout(Some(Duration::from_millis(400)))?;
+    for _ in 0..40 {
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"replay.done\"") {
+                    saw_done = true;
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                if saw_done {
+                    break;
+                }
+                continue;
+            }
+            Err(e) => {
+                client.set_read_timeout(Some(Duration::from_secs(5)))?;
+                return Err(e);
+            }
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    if !saw_done {
+        write_text_frame_client(client, r#"{"id":"r2b-2","cmd":"replay.stop"}"#)?;
+        let _ = drain_until_id(client, "r2b-2")?;
+    }
+
+    let mut udp_buf = [0u8; 64];
+    let mut udp_acc = Vec::new();
+    for _ in 0..8 {
+        match udp_rx.recv_from(&mut udp_buf) {
+            Ok((n, _)) => udp_acc.extend_from_slice(&udp_buf[..n]),
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                break;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    acceptor
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "r2b TCP accept 线程 panic"))??;
+    let tcp_acc = tcp_got
+        .lock()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "tcp_got 锁中毒"))?
+        .clone();
+
+    let _ = std::fs::remove_file(&path);
+
+    let udp_ok = udp_acc.windows(3).any(|w| w == b"RU1")
+        && udp_acc.windows(3).any(|w| w == b"RU2");
+    let tcp_ok = tcp_acc.windows(3).any(|w| w == b"RT1")
+        && tcp_acc.windows(3).any(|w| w == b"RT2");
+    if !udp_ok || !tcp_ok {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "r2b 多路 targets 环回载荷不足: udp={udp_acc:?} tcp={tcp_acc:?} done={saw_done}"
+            ),
+        ));
+    }
+
+    eprintln!("  控制面 replay.start targets[] UDP+TCP 环回：通过");
     Ok(())
 }
 

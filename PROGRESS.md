@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E16 已收口**；无默认主线，备选仅剩 **E15** MQTT mTLS（或缺省再现场选定） |
+| **下一步** | **R2 已收口**；**E15** MQTT mTLS **搁置**；无默认主线（待现场再选定） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -166,7 +166,7 @@ fieldreplay/
 | 录制：添加「视频 RTP」文案无内部任务号 | 通过 | 「RTP/UDP 监听地址（不解编码；RTSP 后置）」 |
 | `npm run lint` | 通过 | `tsc --noEmit` |
 
-### 阶段 X — 备选增强（**E16 已收口**；无默认主线）
+### 阶段 X — 备选增强（**R2 已收口**；无默认主线）
 
 > 增强项编号 E8–E12 = 串口 / MQTT 凭据 TLS / pcap 导出 / 多通道 / 多路 sink（与上方早期「重放 E8–E13」编号不同，读全称）。  
 > **选定轨道后**只做该轨道第一格；先需求文档再代码。
@@ -175,9 +175,10 @@ fieldreplay/
 |----|------|------|------|
 | A **E13** trim+marker | — | E13a–d 全部完成 | **已收口** |
 | B **E14** pcap 导入 | — | E14a–d 全部完成 | **已收口** |
-| C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
+| C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | **搁置** |
 | D **E16** 录制暂停 | — | 相对戳冻结；引擎+UI+多路自检 | **已收口** |
 | E **R1** 回归 | — | R1a 通过；R1b 无缺陷跳过 | **已收口** |
+| F **R2** 控制面 multi targets WS | — | 补 R1 残留：`targets[]` 环回自检 | **已收口** |
 
 #### E13 会话 trim + marker
 
@@ -197,14 +198,21 @@ fieldreplay/
 | E14c | 控制面 import | [x] | 2026-10-30：`session.importPcap`（b64/path；默认替换会话；统计+FCAP b64）；CLI `import-pcap`；自检 WS 写读 |
 | E14d | UI 载入入口 + 手测 | [x] | 2026-10-30：重演页「导入 .pcap」；`session.importPcap`；未连引擎拒绝假导入；`npm run build` 通过 |
 
-#### E15 MQTT mTLS
+#### E15 MQTT mTLS（搁置）
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| E15a | 需求入库（证书路径/控制面 JSON） | [ ] |
+| E15a | 需求入库（证书路径/控制面 JSON） | [ ] 搁置 |
 | E15b | 引擎 mTLS 录放 | [ ] |
 | E15c | 控制面 + UI（单路/多路） | [ ] |
 | E15d | mTLS 自检夹具 | [ ] |
+
+#### R2 控制面 multi targets[] WS
+
+| ID | 任务 | 状态 | 完成记录 |
+|----|------|------|----------|
+| R2a | 需求入库 + 相对 E15 选定理由 | [x] | 2026-10-30：`docs/requirements/20261030-control-multi-targets-ws.md`；E15 搁置 |
+| R2b | WS `targets[]` UDP+TCP 环回自检 | [x] | 2026-10-30：挂入控制面 self-check；两路均收到载荷；R1 该残留关闭 |
 
 #### E16 录制暂停
 
@@ -220,13 +228,13 @@ fieldreplay/
 | ID | 任务 | 状态 | 完成记录 |
 |----|------|------|----------|
 | R1a | 手测 E12d：UDP+TCP / UDP+串口 / UDP+MQTT | [x] | 2026-10-30：`cargo run -- self-check` 全过（含三组多路对齐）；`multiReplayTargets.selfcheck` ok；UI 表单项/跳过文案静态核对无「多路暂仅 UDP」；无产品缺陷 |
-| R1b | 按缺陷修并回写进度本 | [x] | 2026-10-30：无缺陷，跳过。残留风险：控制面 WS 自检未跑 multi `targets[]`（库级已覆盖）；实口对 `FIELDREPLAY_SERIAL_PAIR` 未设故跳过 |
+| R1b | 按缺陷修并回写进度本 | [x] | 2026-10-30：无缺陷，跳过。残留「控制面 multi targets[]」已由 **R2** 关闭；实口对 `FIELDREPLAY_SERIAL_PAIR` 未设故仍跳过 |
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **E16 已收口**；无默认主线时先问用户是否开 **E15** 或其它增强
+1. 读 `PROGRESS.md` → **R2 / E16 已收口**；**E15 搁置**；无默认主线时先问用户再开新轨
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** 已收口；规格见 `docs/requirements/20261030-record-pause.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 仍待命
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -287,3 +295,4 @@ fieldreplay/
 | 2026-10-30 | E16b 引擎收口：`record.pause`/`resume` + 时钟冻结 + WS 自检 | `SessionClock` 共享暂停态；multi_record 排空不落盘；status.recording.paused；下一格 E16c UI |
 | 2026-10-30 | E16c UI 收口：录制页真实 pause/resume | 去掉「暂不支持」；继续走 `record.resume`（不再误调 start）；暂停中可插 marker；下一格 E16d |
 | 2026-10-30 | E16d / E16 全轨收口 | 多路 UDP+TCP 共享轴 pause 自检；暂停期无推送/无落盘；下一主线现场选定（E15 或其它） |
+| 2026-10-30 | **选定 R2**（先于 E15）并全轨收口 | 补 R1 控制面 multi `targets[]` WS 洞；E15 搁置；无默认主线 |
