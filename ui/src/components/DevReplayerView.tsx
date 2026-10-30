@@ -10,7 +10,13 @@ import {
   ReplayConfig,
 } from '../types/recorder';
 import { ReplayTargetType } from '../engine/replayTargetConfig';
+import {
+  buildDefaultChannelTargets,
+  ChannelReplayTargetRow,
+  listEnabledMultiTargets,
+} from '../engine/multiReplayTargets';
 import { formatSerialLineSummary } from '../utils/serialParams';
+import { ReplayChannelTargets } from './ReplayChannelTargets';
 import {
   Play,
   Pause,
@@ -26,6 +32,24 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
+export type EngineStartReplayRequest =
+  | {
+      mode: 'single';
+      tab: ReplayTargetType;
+      cfg: ReplayConfig;
+      fromUs: number;
+    }
+  | {
+      mode: 'multi';
+      targets: Array<{
+        ch: number;
+        type: string;
+        config: Record<string, unknown>;
+      }>;
+      cfg: ReplayConfig;
+      fromUs: number;
+    };
+
 interface DevReplayerViewProps {
   sessionMetadata: CaptureSessionMetadata;
   packets: CapturedPacket[];
@@ -40,11 +64,7 @@ interface DevReplayerViewProps {
     durationUs: number;
   } | null;
   engineReplayDoneSeq?: number;
-  onEngineStartReplay?: (
-    tab: ReplayTargetType,
-    cfg: ReplayConfig,
-    fromUs: number
-  ) => Promise<void>;
+  onEngineStartReplay?: (req: EngineStartReplayRequest) => Promise<void>;
   onEngineStopReplay?: () => Promise<unknown>;
   onEnginePauseReplay?: () => Promise<unknown>;
   onEngineResumeReplay?: () => Promise<unknown>;
@@ -137,10 +157,16 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   });
 
   const [activeTargetTab, setActiveTargetTab] = useState<'udp' | 'serial' | 'tcp' | 'mqtt'>('tcp');
+  const [channelTargets, setChannelTargets] = useState<ChannelReplayTargetRow[]>(
+    () => buildDefaultChannelTargets(sessionMetadata.channels)
+  );
+  const [replayHint, setReplayHint] = useState<string | null>(null);
 
   const sessionIsVideo =
     packets.some((p) => p.channelType === 'video_stream')
     || sessionMetadata.channels.some((c) => c.type === 'video_stream');
+  /** ≥2 通道走 E11d 多目标；单通道保留完整协议页 */
+  const useMultiChannelTargets = sessionMetadata.channels.length >= 2;
 
   const [dispatchedPackets, setDispatchedPackets] = useState<
     { id: number; time: string; channel: string; status: 'ok' | 'dropped' | 'corrupted'; bytes: number }[]
@@ -148,16 +174,27 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 载入视频会话时切到 UDP/RTP 目标区，默认推送口 5004
+  const sessionChannelKey = sessionMetadata.channels
+    .map((c) => `${c.id}:${c.type}:${c.packetCount}`)
+    .join('|');
+
+  // 会话通道表变化时重建每路目标默认值（避免父组件重渲染冲掉用户改口）
   useEffect(() => {
-    if (!sessionIsVideo) return;
+    setChannelTargets(buildDefaultChannelTargets(sessionMetadata.channels));
+    setReplayHint(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionMetadata.sessionTitle, sessionChannelKey]);
+
+  // 载入视频会话时切到 UDP/RTP 目标区，默认推送口 5004（单通道页）
+  useEffect(() => {
+    if (!sessionIsVideo || useMultiChannelTargets) return;
     setActiveTargetTab('udp');
     setReplayConfig((prev) =>
       prev.targetUdpPort === 8080
         ? { ...prev, targetUdpPort: 5004 }
         : prev
     );
-  }, [sessionIsVideo, sessionMetadata.sessionTitle, sessionMetadata.totalPackets]);
+  }, [sessionIsVideo, useMultiChannelTargets, sessionMetadata.sessionTitle, sessionMetadata.totalPackets]);
 
   const [serialListBusy, setSerialListBusy] = useState(false);
   const [serialListHint, setSerialListHint] = useState<string | null>(null);
@@ -366,12 +403,40 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       const fromUs = packets[safeIndex]?.timestampUs ?? 0;
       setDispatchedPackets([]);
       setIsPaused(false);
-      void onEngineStartReplay!(activeTargetTab, replayConfig, fromUs)
+      setReplayHint(null);
+
+      let startReq: EngineStartReplayRequest;
+      if (useMultiChannelTargets) {
+        const targets = listEnabledMultiTargets(channelTargets);
+        if (targets.length === 0) {
+          engineBusyRef.current = false;
+          setReplayHint(
+            '请至少启用一路可多路重放的通道目标（UDP / 视频 UDP）'
+          );
+          return;
+        }
+        startReq = {
+          mode: 'multi',
+          targets,
+          cfg: replayConfig,
+          fromUs,
+        };
+      } else {
+        startReq = {
+          mode: 'single',
+          tab: activeTargetTab,
+          cfg: replayConfig,
+          fromUs,
+        };
+      }
+
+      void onEngineStartReplay!(startReq)
         .then(() => {
           setIsPlaying(true);
         })
         .catch((e) => {
           console.error(e);
+          setReplayHint(e instanceof Error ? e.message : String(e));
           setIsPlaying(false);
           setIsPaused(false);
         })
@@ -655,7 +720,9 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                     {useEngineReplay
                       ? isPaused
                         ? '继续重演'
-                        : '引擎重演'
+                        : useMultiChannelTargets
+                          ? '多路引擎重演'
+                          : '引擎重演'
                       : '高保真重演'}
                   </span>
                 </>
@@ -738,15 +805,34 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <div className="flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-sky-600" />
               <h2 className="text-xs font-bold text-slate-900 tracking-wide">
-                重放输出目标映射
+                {useMultiChannelTargets
+                  ? '多通道重放目标'
+                  : '重放输出目标映射'}
               </h2>
             </div>
             <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              就绪
+              {useMultiChannelTargets
+                ? `${sessionMetadata.channels.length} 通道`
+                : '就绪'}
             </span>
           </div>
 
+          {replayHint && (
+            <div className="px-2 py-1.5 bg-rose-50 border border-rose-200 rounded-md text-[11px] text-rose-800 flex items-start gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>{replayHint}</span>
+            </div>
+          )}
+
+          {useMultiChannelTargets ? (
+            <ReplayChannelTargets
+              rows={channelTargets}
+              disabled={engineBusy}
+              onChange={setChannelTargets}
+            />
+          ) : (
+            <>
           {/* 4-Protocol Tab Switcher */}
           <div className="grid grid-cols-4 gap-0.5 p-0.5 bg-slate-100 rounded-md text-xs">
             <button
@@ -1402,6 +1488,8 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
                 </div>
               </div>
             </div>
+          )}
+            </>
           )}
         </div>
 

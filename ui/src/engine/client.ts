@@ -217,9 +217,16 @@ export class EngineClient {
   }
 
   startReplay(args: {
-    type: string;
-    config: Record<string, unknown>;
+    /** 单路；与 targets 二选一（引擎：非空 targets 优先） */
+    type?: string;
+    config?: Record<string, unknown>;
     topicPrefix?: string;
+    /** E11c/E11d 多路目标（按通道 index 绑定） */
+    targets?: Array<{
+      ch: number;
+      type: string;
+      config: Record<string, unknown>;
+    }>;
     /** 墙钟倍速；默认 1.0 */
     speed?: number;
     /** 从该相对微秒起播（跳过更早数据帧） */

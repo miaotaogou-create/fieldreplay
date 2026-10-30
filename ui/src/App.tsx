@@ -21,10 +21,7 @@ import { DevReplayerView } from './components/DevReplayerView';
 import { PacketsView } from './components/PacketsView';
 import { channelToEngineConfig } from './engine/channelConfig';
 import { defaultEngineUrl, EngineClient } from './engine/client';
-import {
-  replayConfigToEngine,
-  ReplayTargetType,
-} from './engine/replayTargetConfig';
+import { replayConfigToEngine } from './engine/replayTargetConfig';
 import { EngineConnState } from './engine/types';
 import {
   emptySessionMetadata,
@@ -33,8 +30,8 @@ import {
   metadataToFcapMeta,
 } from './engine/sessionMap';
 import { hasShellIpc, postShellCommand } from './shell/windowControls';
-import { ReplayConfig } from './types/recorder';
 import { AlertTriangle, Download } from 'lucide-react';
+import type { EngineStartReplayRequest } from './components/DevReplayerView';
 
 const TOAST_MS = 3500;
 
@@ -249,11 +246,7 @@ export default function App() {
     return result;
   };
 
-  const handleEngineStartReplay = async (
-    tab: ReplayTargetType,
-    cfg: ReplayConfig,
-    fromUs: number
-  ) => {
+  const handleEngineStartReplay = async (req: EngineStartReplayRequest) => {
     const engine = engineRef.current;
     if (!engine?.connected) {
       throw new Error('引擎未连接');
@@ -261,6 +254,47 @@ export default function App() {
     if (recordedPackets.length === 0) {
       throw new Error('会话无帧，请先载入 .fcap');
     }
+    const { cfg, fromUs } = req;
+    setEngineReplayTick(null);
+    const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
+    const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
+    const faultCfg = cfg.faultInjection;
+    const fault =
+      faultCfg?.enabled
+        ? {
+            enabled: true,
+            lossRatePercent: Math.max(0, Math.min(100, Math.floor(faultCfg.lossRatePercent || 0))),
+            corruptCrc: !!faultCfg.corruptCrc,
+          }
+        : undefined;
+    const loop = !!cfg.loop;
+    const faultHint =
+      fault && (fault.lossRatePercent > 0 || fault.corruptCrc)
+        ? ` · 故障注入${fault.lossRatePercent > 0 ? ` 丢包${fault.lossRatePercent}%` : ''}${
+            fault.corruptCrc ? ' 篡改' : ''
+          }`
+        : '';
+    const loopHint = loop ? ' · 循环' : '';
+    const speedHint = speed === 1 ? '' : `（${speed}x）`;
+
+    if (req.mode === 'multi') {
+      const result = await engine.startReplay({
+        targets: req.targets,
+        speed,
+        fromUs: startUs,
+        loop,
+        fault,
+      });
+      const n = result.targets?.length ?? req.targets.length;
+      const skipped = result.skipped?.length ?? 0;
+      const skipHint = skipped > 0 ? ` · 跳过 ${skipped} 路` : '';
+      showToast(
+        `已开始多路对齐重放：${n} 路目标${speedHint}${faultHint}${loopHint}${skipHint}`
+      );
+      return;
+    }
+
+    const { tab } = req;
     const mapped = replayConfigToEngine(tab, cfg);
     // 视频会话：type=video_stream；E7d 可选 RTSP 服务端，否则 UDP 推送
     const sessionIsVideo =
@@ -277,19 +311,6 @@ export default function App() {
             media: 'rtsp_tcp',
           }
         : mapped.config;
-    setEngineReplayTick(null);
-    const speed = Number.isFinite(cfg.speed) && cfg.speed > 0 ? cfg.speed : 1;
-    const startUs = Number.isFinite(fromUs) && fromUs > 0 ? Math.floor(fromUs) : 0;
-    const faultCfg = cfg.faultInjection;
-    const fault =
-      faultCfg?.enabled
-        ? {
-            enabled: true,
-            lossRatePercent: Math.max(0, Math.min(100, Math.floor(faultCfg.lossRatePercent || 0))),
-            corruptCrc: !!faultCfg.corruptCrc,
-          }
-        : undefined;
-    const loop = !!cfg.loop;
     await engine.startReplay({
       type: replayType,
       config,
@@ -299,17 +320,8 @@ export default function App() {
       loop,
       fault,
     });
-    const faultHint =
-      fault && (fault.lossRatePercent > 0 || fault.corruptCrc)
-        ? ` · 故障注入${fault.lossRatePercent > 0 ? ` 丢包${fault.lossRatePercent}%` : ''}${
-            fault.corruptCrc ? ' 篡改' : ''
-          }`
-        : '';
-    const loopHint = loop ? ' · 循环' : '';
     showToast(
-      speed === 1
-        ? `已开始引擎重放：${replayType}${faultHint}${loopHint}`
-        : `已开始引擎重放：${replayType}（${speed}x）${faultHint}${loopHint}`
+      `已开始引擎重放：${replayType}${speedHint}${faultHint}${loopHint}`
     );
   };
 

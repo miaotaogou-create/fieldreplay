@@ -78,10 +78,26 @@ export interface EngineRecordStopResult {
   warning?: string;
 }
 
-export interface EngineReplayStartResult {
-  started: boolean;
+export interface EngineReplaySkippedChannel {
+  ch: number;
+  type: string;
+  name: string;
+}
+
+export interface EngineReplayTargetDto {
+  ch: number;
   type: string;
   config: Record<string, unknown>;
+}
+
+export interface EngineReplayStartResult {
+  started: boolean;
+  /** 单路响应 */
+  type?: string;
+  config?: Record<string, unknown>;
+  /** E11c/E11d 多路响应 */
+  targets?: EngineReplayTargetDto[];
+  skipped?: EngineReplaySkippedChannel[];
   durationUs: number;
   speed?: number;
   fromUs?: number;
