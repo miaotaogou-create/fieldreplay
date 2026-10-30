@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **R2 已收口**；**E15** MQTT mTLS **搁置**；无默认主线（待现场再选定） |
+| **下一步** | **E2E Lab** 分步手测；当前 **E2E-1** 本机 RTSP（见 `docs/requirements/20261030-e2e-lab.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
