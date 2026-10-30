@@ -19,6 +19,7 @@ import {
   EngineRpcOk,
   EngineSessionDto,
   EngineSessionExportResult,
+  EngineSerialListResult,
 } from './types';
 
 const DEFAULT_URL = 'ws://127.0.0.1:17890';
@@ -224,6 +225,11 @@ export class EngineClient {
 
   seekReplay(relativeUs: number): Promise<EngineReplaySeekResult> {
     return this.request<EngineReplaySeekResult>('replay.seek', { relativeUs });
+  }
+
+  /** E8a：枚举本机串口（Windows COM） */
+  listSerialPorts(): Promise<EngineSerialListResult> {
+    return this.request<EngineSerialListResult>('serial.list', {});
   }
 }
 

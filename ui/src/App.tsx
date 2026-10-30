@@ -323,6 +323,15 @@ export default function App() {
     return engine.seekReplay(Math.max(0, Math.floor(relativeUs)));
   };
 
+  const handleListSerialPorts = async () => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      throw new Error('引擎未连接');
+    }
+    const result = await engine.listSerialPorts();
+    return Array.isArray(result.ports) ? result.ports : [];
+  };
+
   const handleClearSession = () => {
     setRecordedPackets([]);
     setSessionMetadata(emptySessionMetadata());
@@ -521,6 +530,7 @@ export default function App() {
             onEngineStartRecord={handleEngineStartRecord}
             onEngineStopRecord={handleEngineStopRecord}
             pickRecordChannel={pickRecordChannel}
+            onListSerialPorts={handleListSerialPorts}
           />
         )}
 
@@ -539,6 +549,7 @@ export default function App() {
             onEnginePauseReplay={handleEnginePauseReplay}
             onEngineResumeReplay={handleEngineResumeReplay}
             onEngineSeekReplay={handleEngineSeekReplay}
+            onListSerialPorts={handleListSerialPorts}
           />
         )}
 

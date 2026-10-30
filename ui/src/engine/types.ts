@@ -112,3 +112,8 @@ export interface EngineSessionExportResult {
   bytes: number;
   b64: string;
 }
+
+/** E8a：本机串口枚举 */
+export interface EngineSerialListResult {
+  ports: string[];
+}

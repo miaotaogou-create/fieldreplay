@@ -37,5 +37,5 @@ pub use replay::{
     replay_video_rtsp_from_file, FaultInjection, FaultRng, MqttReplayOptions, ReplayOptions,
     RtspReplayOptions, SerialReplayOptions, TcpReplayOptions,
 };
-pub use serial::{Parity, SerialConfig, SerialPort};
+pub use serial::{list_ports, Parity, SerialConfig, SerialPort};
 pub use tcp::{TcpConfig, TcpRole};

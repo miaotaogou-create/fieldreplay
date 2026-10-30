@@ -1,4 +1,4 @@
-//! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.*；可选 HTTP 静态 UI。
+//! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -242,6 +242,22 @@ fn dispatch(msg: &str, state: &Arc<Mutex<ControlState>>, hub: &Arc<PushHub>) -> 
             let _ = replaying;
             reply
         }
+        "serial.list" => match crate::serial::list_ports() {
+            Ok(ports) => {
+                let mut arr = String::from("[");
+                for (i, p) in ports.iter().enumerate() {
+                    if i > 0 {
+                        arr.push(',');
+                    }
+                    arr.push('"');
+                    arr.push_str(&escape_str(p));
+                    arr.push('"');
+                }
+                arr.push(']');
+                ok_result(&id, &format!("{{\"ports\":{arr}}}"))
+            }
+            Err(e) => err_result(&id, &e.to_string()),
+        },
         other => err_result(&id, &format!("未知 cmd: {other}")),
     }
 }
@@ -408,6 +424,18 @@ pub fn self_check_control() -> io::Result<()> {
             format!("ping 失败: {pong}"),
         ));
     }
+
+    write_text_frame_client(&mut client, r#"{"id":"1b","cmd":"serial.list"}"#)?;
+    let ports_resp = read_text_frame(&mut client)?.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::UnexpectedEof, "未收到 serial.list 响应")
+    })?;
+    if !ports_resp.contains("\"ok\":true") || !ports_resp.contains("\"ports\":") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("serial.list 失败: {ports_resp}"),
+        ));
+    }
+    eprintln!("  控制面 serial.list：通过");
 
     let open = format!(
         r#"{{"id":"2","cmd":"session.open","path":"{}"}}"#,

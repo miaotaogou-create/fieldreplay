@@ -138,6 +138,19 @@ impl SerialPort {
     }
 }
 
+/// 枚举本机串口名（如 `COM3`）。Windows 用 `QueryDosDeviceW`；其它平台返回空列表。
+/// 无口时返回空 `Vec`（不视为错误）。
+pub fn list_ports() -> io::Result<Vec<String>> {
+    #[cfg(windows)]
+    {
+        win::list_ports()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(Vec::new())
+    }
+}
+
 struct MemEnd {
     tx: mpsc::Sender<Vec<u8>>,
     rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
@@ -290,10 +303,16 @@ mod win {
         fn SetCommTimeouts(h: HANDLE, t: *const CommTimeouts) -> BOOL;
         fn GetLastError() -> DWORD;
         fn PurgeComm(h: HANDLE, flags: DWORD) -> BOOL;
+        fn QueryDosDeviceW(
+            name: *const WCHAR,
+            target: *mut WCHAR,
+            size: DWORD,
+        ) -> DWORD;
     }
 
     const PURGE_RXCLEAR: DWORD = 0x0008;
     const PURGE_TXCLEAR: DWORD = 0x0004;
+    const ERROR_INSUFFICIENT_BUFFER: DWORD = 122;
 
     pub struct WinPort {
         handle: OwnedHandle,
@@ -431,6 +450,68 @@ mod win {
             format!(r"\\.\{n}")
         }
     }
+
+    /// 枚举 DOS 设备名中的 `COMn`（含 COM10+），按编号排序。
+    pub fn list_ports() -> io::Result<Vec<String>> {
+        // 缓冲不够时按 ERROR_INSUFFICIENT_BUFFER 扩容重试
+        let mut cap: usize = 16 * 1024;
+        let mut buf: Vec<u16> = vec![0; cap];
+        loop {
+            let n = unsafe { QueryDosDeviceW(ptr::null(), buf.as_mut_ptr(), cap as DWORD) };
+            if n != 0 {
+                buf.truncate(n as usize);
+                break;
+            }
+            let err = unsafe { GetLastError() };
+            if err != ERROR_INSUFFICIENT_BUFFER {
+                return Err(io::Error::from_raw_os_error(err as i32));
+            }
+            cap = cap.saturating_mul(2).max(cap + 1);
+            if cap > 1024 * 1024 {
+                return Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    "QueryDosDeviceW 缓冲过大",
+                ));
+            }
+            buf.resize(cap, 0);
+        }
+
+        let mut ports = Vec::new();
+        let mut start = 0usize;
+        while start < buf.len() {
+            if let Some(rel) = buf[start..].iter().position(|&c| c == 0) {
+                if rel == 0 {
+                    break; // 双 NUL 结束
+                }
+                let name = String::from_utf16_lossy(&buf[start..start + rel]);
+                if is_com_name(&name) {
+                    ports.push(name);
+                }
+                start += rel + 1;
+            } else {
+                break;
+            }
+        }
+        ports.sort_by_key(|p| com_sort_key(p));
+        ports.dedup();
+        Ok(ports)
+    }
+
+    fn is_com_name(name: &str) -> bool {
+        let u = name.to_ascii_uppercase();
+        let rest = match u.strip_prefix("COM") {
+            Some(r) => r,
+            None => return false,
+        };
+        !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit())
+    }
+
+    fn com_sort_key(name: &str) -> u32 {
+        name.to_ascii_uppercase()
+            .strip_prefix("COM")
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(u32::MAX)
+    }
 }
 
 #[cfg(test)]
@@ -453,5 +534,16 @@ mod tests {
         let mut buf = [0u8; 16];
         let n = b.read(&mut buf).unwrap().expect("应读到数据");
         assert_eq!(&buf[..n], b"hello");
+    }
+
+    #[test]
+    fn list_ports_does_not_fail() {
+        let ports = list_ports().expect("枚举串口不应失败");
+        for p in &ports {
+            assert!(
+                p.to_ascii_uppercase().starts_with("COM"),
+                "意外端口名: {p}"
+            );
+        }
     }
 }

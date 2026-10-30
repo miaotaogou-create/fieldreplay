@@ -48,7 +48,20 @@ interface DevReplayerViewProps {
   onEnginePauseReplay?: () => Promise<unknown>;
   onEngineResumeReplay?: () => Promise<unknown>;
   onEngineSeekReplay?: (relativeUs: number) => Promise<unknown>;
+  /** E8a：向引擎枚举本机 COM；未连引擎时不调用 */
+  onListSerialPorts?: () => Promise<string[]>;
 }
+
+const FALLBACK_SERIAL_PORTS = [
+  'COM1',
+  'COM2',
+  'COM3',
+  'COM4',
+  'COM10',
+  'COM11',
+  '/dev/ttyUSB0',
+  '/dev/pts/2',
+];
 
 export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   sessionMetadata,
@@ -64,6 +77,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   onEnginePauseReplay,
   onEngineResumeReplay,
   onEngineSeekReplay,
+  onListSerialPorts,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   /** 引擎重放已启动且处于暂停（时间轴冻结）；离线 mock 不用此态 */
@@ -86,7 +100,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
       hostComPort: 'COM1',
       baudRate: 115200,
       isPortOpen: true,
-      availablePorts: ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11', '/dev/ttyUSB0', '/dev/pts/2'],
+      availablePorts: [...FALLBACK_SERIAL_PORTS],
     },
     tcp: {
       mode: 'tool_is_server',
@@ -135,6 +149,51 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
         : prev
     );
   }, [sessionIsVideo, sessionMetadata.sessionTitle, sessionMetadata.totalPackets]);
+
+  const [serialListBusy, setSerialListBusy] = useState(false);
+  const [serialListHint, setSerialListHint] = useState<string | null>(null);
+
+  const refreshSerialPorts = async () => {
+    if (!engineConnected || !onListSerialPorts) {
+      setSerialListHint('引擎未连接，使用本地兜底列表');
+      setReplayConfig((prev) => ({
+        ...prev,
+        serial: { ...prev.serial, availablePorts: [...FALLBACK_SERIAL_PORTS] },
+      }));
+      return;
+    }
+    setSerialListBusy(true);
+    setSerialListHint(null);
+    try {
+      const ports = await onListSerialPorts();
+      setReplayConfig((prev) => {
+        const keep = [prev.serial.selectedPort, prev.serial.hostComPort].filter(Boolean);
+        const merged = Array.from(new Set([...(ports.length ? ports : FALLBACK_SERIAL_PORTS), ...keep]));
+        return {
+          ...prev,
+          serial: {
+            ...prev.serial,
+            availablePorts: merged,
+          },
+        };
+      });
+      setSerialListHint(
+        ports.length === 0 ? '本机未枚举到 COM，已保留兜底/当前选项' : `已刷新 ${ports.length} 个串口`
+      );
+    } catch (e) {
+      setSerialListHint(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSerialListBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!engineConnected) return;
+    void refreshSerialPorts();
+    // 仅随连接态刷新；手动点「刷新」可再取
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engineConnected]);
+
   const timerRef = useRef<any>(null);
   const engineBusyRef = useRef(false);
   const hasPackets = packets.length > 0;
@@ -1056,9 +1115,20 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
           {/* Tab 4: Serial Handler */}
           {activeTargetTab === 'serial' && (
             <div className="p-2.5 bg-slate-50 rounded-md border border-slate-200/80 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold text-slate-800">串口 / RS485 虚拟对</span>
+                <button
+                  type="button"
+                  onClick={() => void refreshSerialPorts()}
+                  disabled={serialListBusy}
+                  className="px-2 py-0.5 rounded text-[11px] font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {serialListBusy ? '刷新中…' : '刷新本机口'}
+                </button>
               </div>
+              {serialListHint && (
+                <p className="text-[10px] text-slate-500">{serialListHint}</p>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-2 bg-white rounded-md border border-slate-200/90">
                 <div>

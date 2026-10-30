@@ -39,7 +39,11 @@ interface FieldRecorderViewProps {
   onEngineStartRecord: (channel: ChannelConfig) => Promise<void>;
   onEngineStopRecord: () => Promise<unknown>;
   pickRecordChannel: (channels: ChannelConfig[]) => ChannelConfig | null;
+  /** E8a：向引擎枚举本机 COM */
+  onListSerialPorts?: () => Promise<string[]>;
 }
+
+const FALLBACK_SERIAL_PORTS = ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11'];
 
 export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   channels,
@@ -54,6 +58,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   onEngineStartRecord,
   onEngineStopRecord,
   pickRecordChannel,
+  onListSerialPorts,
 }) => {
   const [recordState, setRecordState] = useState<'idle' | 'recording' | 'paused'>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -79,6 +84,31 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     'serial' | 'udp' | 'tcp' | 'mqtt' | 'video_stream'
   >('serial');
   const [newChanParam, setNewChanParam] = useState('COM4, 921600, 8-N-1');
+  const [serialPorts, setSerialPorts] = useState<string[]>([...FALLBACK_SERIAL_PORTS]);
+  const [serialListHint, setSerialListHint] = useState<string | null>(null);
+
+  const refreshSerialPorts = async () => {
+    if (!engineConnected || !onListSerialPorts) {
+      setSerialPorts([...FALLBACK_SERIAL_PORTS]);
+      setSerialListHint('引擎未连接，使用本地兜底列表');
+      return;
+    }
+    try {
+      const ports = await onListSerialPorts();
+      setSerialPorts(ports.length ? ports : [...FALLBACK_SERIAL_PORTS]);
+      setSerialListHint(
+        ports.length === 0 ? '本机未枚举到 COM，已用兜底列表' : `本机 ${ports.length} 个串口`
+      );
+    } catch (e) {
+      setSerialListHint(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  useEffect(() => {
+    if (!showAddChannelModal || newChanType !== 'serial') return;
+    void refreshSerialPorts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAddChannelModal, newChanType, engineConnected]);
 
   // Auto-scroll log
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -873,6 +903,42 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   ? 'RTP/UDP 监听或 RTSP URL（不解编码）'
                   : '监听地址'}
               </label>
+              {newChanType === 'serial' && (
+                <div className="flex items-center gap-2 mb-1.5">
+                  <select
+                    value={newChanParam.split(',')[0]?.trim() || serialPorts[0] || 'COM3'}
+                    onChange={(e) => {
+                      const rest = newChanParam.includes(',')
+                        ? newChanParam.slice(newChanParam.indexOf(','))
+                        : ', 115200, 8-N-1';
+                      setNewChanParam(`${e.target.value}${rest}`);
+                    }}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900 font-mono focus:bg-white"
+                  >
+                    {Array.from(
+                      new Set(
+                        [newChanParam.split(',')[0]?.trim(), ...serialPorts].filter(
+                          (p): p is string => !!p
+                        )
+                      )
+                    ).map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void refreshSerialPorts()}
+                    className="px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shrink-0"
+                  >
+                    刷新
+                  </button>
+                </div>
+              )}
+              {newChanType === 'serial' && serialListHint && (
+                <p className="text-[10px] text-slate-500 mb-1">{serialListHint}</p>
+              )}
               <input
                 type="text"
                 value={newChanParam}
