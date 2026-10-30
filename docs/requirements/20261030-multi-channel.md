@@ -90,4 +90,4 @@
 
 ## 建议下一手
 
-E11 已收口；多路 sink 扩展见 `20261030-multi-sink.md`（E12）。其余备选：会话 trim+marker、pcap 导入、MQTT 客户端证书、录制暂停。
+E11 已收口；多路 sink 扩展见 `20261030-multi-sink.md`（E12）。会话 trim+marker 见 `20261030-session-trim-marker.md`（E13）。其余备选：pcap 导入、MQTT 客户端证书、录制暂停。

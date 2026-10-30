@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | E12 已收口；备选已拆 **E13–E16 / R1**（见下方「阶段 X」）；**现场再挑一条**再开需求文档；无默认主线 |
+| **下一步** | **E13 已选定**；E13a 需求已入库 → 下一格 **E13b**（引擎插 marker + 自检） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -166,27 +166,27 @@ fieldreplay/
 | 录制：添加「视频 RTP」文案无内部任务号 | 通过 | 「RTP/UDP 监听地址（不解编码；RTSP 后置）」 |
 | `npm run lint` | 通过 | `tsc --noEmit` |
 
-### 阶段 X — 备选增强（E12 后；现场再挑一条主线）
+### 阶段 X — 备选增强（当前主线：**E13** trim+marker）
 
 > 增强项编号 E8–E12 = 串口 / MQTT 凭据 TLS / pcap 导出 / 多通道 / 多路 sink（与上方早期「重放 E8–E13」编号不同，读全称）。  
 > **选定轨道后**只做该轨道第一格；先需求文档再代码。
 
-| 轨 | 首格 | 内容 |
-|----|------|------|
-| A **E13** trim+marker | E13a | 需求：`session-trim-marker`；非目标含多文件 merge |
-| B **E14** pcap 导入 | E14a | 需求：支持链路与跳过规则；与 E10 往返期望 |
-| C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify |
-| D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 |
-| E **R1** 回归 | R1a | 手测 E12d 多协议；无新功能 |
+| 轨 | 首格 | 内容 | 状态 |
+|----|------|------|------|
+| A **E13** trim+marker | E13a | 需求：`20261030-session-trim-marker.md` | **进行中（E13a 已勾）** |
+| B **E14** pcap 导入 | E14a | 需求：支持链路与跳过规则；与 E10 往返期望 | 待命 |
+| C **E15** MQTT mTLS | E15a | 需求：客户端证书字段；仍默认不做 skip_verify | 待命 |
+| D **E16** 录制暂停 | E16a | 需求：**拍板**相对戳冻结 vs 墙钟空洞 | 待命 |
+| E **R1** 回归 | R1a | 手测 E12d 多协议；无新功能 | 待命 |
 
 #### E13 会话 trim + marker
 
-| ID | 任务 | 状态 |
-|----|------|------|
-| E13a | 需求入库（trim 时间窗、marker 时机、验收/非目标） | [ ] |
-| E13b | 引擎：控制面插 `kind=marker` + 自检 | [ ] |
-| E13c | 引擎：时间窗 trim 写出新 `.fcap` + 自检 | [ ] |
-| E13d | UI：插 marker；trim 导出/另存 | [ ] |
+| ID | 任务 | 状态 | 完成记录 |
+|----|------|------|----------|
+| E13a | 需求入库（trim 时间窗、marker 时机、验收/非目标） | [x] | 2026-10-30：`docs/requirements/20261030-session-trim-marker.md`；闭区间再基、整表保留、非目标含 merge |
+| E13b | 引擎：控制面插 `kind=marker` + 自检 | [ ] | |
+| E13c | 引擎：时间窗 trim 写出新 `.fcap` + 自检 | [ ] | |
+| E13d | UI：插 marker；trim 导出/另存 | [ ] | |
 
 #### E14 pcap 导入
 
@@ -224,9 +224,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 若用户已选定 A–E 轨道，只做该轨道 **第一个未勾选** 项；未选定则先问，勿擅自开写
+1. 读 `PROGRESS.md` → 当前主线 **E13**；只做该轨道 **第一个未勾选** 项（现为 **E13b**）
 2. 做完勾选、填完成记录、提交推送；不要顺手做下一格，除非用户当轮点名
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E12** 已收口；下一主线见「阶段 X」；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E12** 已收口；主线 **E13**；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -277,3 +277,4 @@ fieldreplay/
 | 2026-10-30 | 增强项 E11a–d：多通道并发录制 + UI 一键录 + 控制面/UI 多目标对齐重放 | 见 `20261030-multi-channel.md` |
 | 2026-10-30 | 增强项 E12a–d：多路 TCP/串口/MQTT sink + UI 放开 capable | 见 `20261030-multi-sink.md`；多路 RTSP listen 仍单路 |
 | 2026-10-30 | E12 后无默认主线；备选拆为 E13 trim+marker / E14 pcap 导入 / E15 MQTT mTLS / E16 录制暂停 / R1 回归 | 现场再挑一条；先需求文档再代码；编号续增强项序列，勿与早期重放 E8–E13 混读 |
+| 2026-10-30 | **选定 E13** 为下一主线；E13a 需求入库 | 格式已有 marker；现场裁剪/标注价值高；mTLS/录暂停分别缺场景与未拍板戳策略；pcap 导入更大；R1 有引擎自检不挡增强 |

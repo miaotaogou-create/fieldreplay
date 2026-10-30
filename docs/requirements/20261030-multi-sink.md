@@ -73,4 +73,4 @@ E12d 状态：**已完成**。
 
 ## 建议下一手
 
-备选增强：会话 trim+marker / pcap 导入 / MQTT mTLS / 录制暂停（现场再挑）。
+下一主线：会话 trim+marker 见 `20261030-session-trim-marker.md`（E13）。其余备选：pcap 导入 / MQTT mTLS / 录制暂停。
