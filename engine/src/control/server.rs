@@ -1,5 +1,5 @@
 //! 本地 WebSocket 控制面：ping / status / session.* / record.* / replay.* / serial.list；可选 HTTP 静态 UI。
-//! E13b：`session.addMarker`；E13c：`session.trim`；E14c：`session.importPcap`；E16b：`record.pause`/`resume`。
+//! E13b：`session.addMarker`；E13c：`session.trim`；E14c：`session.importPcap`；E16b/d：`record.pause`/`resume`。
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream, UdpSocket};
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::fcap::{ChannelEntry, ChannelType, PacketKind, PacketRecord, SessionReader, SessionWriter};
 
@@ -541,6 +541,8 @@ pub fn self_check_control() -> io::Result<()> {
     self_check_record_via_ws(&mut client)?;
     // E16b：录制 pause/resume + 相对戳冻结
     self_check_record_pause_via_ws(&mut client)?;
+    // E16d：多路共享轴 + 暂停期无推送/无落盘
+    self_check_record_pause_multi_via_ws(&mut client)?;
     // E6a：同端口静态 UI
     self_check_http_static()?;
     Ok(())
@@ -1887,6 +1889,263 @@ fn self_check_record_pause_via_ws(client: &mut TcpStream) -> io::Result<()> {
 
     eprintln!("  控制面 record.pause/resume 相对戳冻结：通过");
     Ok(())
+}
+
+/// E16d：UDP+TCP 多路共享轴 pause/resume；暂停期无 `record.packet`、无新增 data。
+fn self_check_record_pause_multi_via_ws(client: &mut TcpStream) -> io::Result<()> {
+    let udp_probe = UdpSocket::bind("127.0.0.1:0")?;
+    let udp_addr = udp_probe.local_addr()?;
+    drop(udp_probe);
+
+    let tcp_probe = TcpListener::bind("127.0.0.1:0")?;
+    let tcp_addr = tcp_probe.local_addr()?;
+    drop(tcp_probe);
+
+    let out = std::env::temp_dir()
+        .join("fieldreplay_e16d_pause_multi")
+        .join("pause_multi.fcap");
+    let _ = std::fs::create_dir_all(out.parent().unwrap());
+    let _ = std::fs::remove_file(&out);
+
+    let mut start = String::from(
+        r#"{"id":"e16d-1","cmd":"record.start","sessionTitle":"e16d","out":""#,
+    );
+    start.push_str(&escape_path_for_json(&out));
+    start.push_str(r#"","channels":[{"type":"udp","name":"u0","config":{"bind_ip":"127.0.0.1","bind_port":"#);
+    start.push_str(&udp_addr.port().to_string());
+    start.push_str(r#"}},{"type":"tcp","name":"t0","config":{"role":"server","host":"127.0.0.1","port":"#);
+    start.push_str(&tcp_addr.port().to_string());
+    start.push_str(r#"}}]}"#);
+    write_text_frame_client(client, &start)?;
+    let started = drain_until_id(client, "e16d-1")?;
+    if !started.contains("\"ok\":true")
+        || !started.contains("\"started\":true")
+        || !started.contains("\"channels\"")
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("e16d 多路 record.start 失败: {started}"),
+        ));
+    }
+
+    // 等两路就绪（TCP listen + UDP bind）
+    thread::sleep(Duration::from_millis(120));
+    let udp_tx = UdpSocket::bind("127.0.0.1:0")?;
+    let mut tcp_tx = TcpStream::connect(tcp_addr)?;
+    tcp_tx.set_write_timeout(Some(Duration::from_secs(2)))?;
+    thread::sleep(Duration::from_millis(80));
+
+    udp_tx.send_to(b"UPRE", udp_addr)?;
+    tcp_tx.write_all(b"TPRE")?;
+    thread::sleep(Duration::from_millis(80));
+
+    write_text_frame_client(client, r#"{"id":"e16d-2","cmd":"record.pause"}"#)?;
+    let paused = drain_until_id(client, "e16d-2")?;
+    if !paused.contains("\"ok\":true") || !paused.contains("\"paused\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("e16d record.pause 失败: {paused}"),
+        ));
+    }
+
+    // 排空暂停前残留推送
+    let _ = count_record_packet_events(client, Duration::from_millis(150))?;
+
+    // 暂停窗口内边灌包边监听：应无新 record.packet
+    let pause_wall = Duration::from_millis(220);
+    let during = pump_and_count_packet_events(
+        client,
+        &udp_tx,
+        udp_addr,
+        &mut tcp_tx,
+        pause_wall,
+    )?;
+    if during > 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("暂停期不应推送 record.packet，实际 {during} 条"),
+        ));
+    }
+
+    write_text_frame_client(client, r#"{"id":"e16d-3","cmd":"record.resume"}"#)?;
+    let resumed = drain_until_id(client, "e16d-3")?;
+    if !resumed.contains("\"ok\":true") || !resumed.contains("\"paused\":false") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("e16d record.resume 失败: {resumed}"),
+        ));
+    }
+
+    thread::sleep(Duration::from_millis(40));
+    udp_tx.send_to(b"UPOST", udp_addr)?;
+    tcp_tx.write_all(b"TPOST")?;
+    thread::sleep(Duration::from_millis(100));
+
+    write_text_frame_client(client, r#"{"id":"e16d-4","cmd":"record.stop"}"#)?;
+    let stop_reply = drain_until_id(client, "e16d-4")?;
+    if !stop_reply.contains("\"ok\":true") || !stop_reply.contains("\"stopped\":true") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("e16d record.stop 失败: {stop_reply}"),
+        ));
+    }
+
+    let mut reader = SessionReader::open(&out)?;
+    let channels = reader.channels().to_vec();
+    let packets = reader.read_all_packets()?;
+    let _ = std::fs::remove_file(&out);
+
+    if channels.len() != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("通道表应为 2 路，实际 {}", channels.len()),
+        ));
+    }
+    if channels[0].channel_type != ChannelType::Udp || channels[1].channel_type != ChannelType::Tcp {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "期望 UDP+TCP，实际 {:?}+{:?}",
+                channels[0].channel_type, channels[1].channel_type
+            ),
+        ));
+    }
+
+    let data: Vec<_> = packets
+        .iter()
+        .filter(|p| p.kind == PacketKind::Data)
+        .collect();
+    if data.iter().any(|p| {
+        let pl = p.payload.as_slice();
+        pl.starts_with(b"UDROP") || pl.starts_with(b"TDROP") || pl == b"DROP"
+    }) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "暂停期收包不应落盘: {:?}",
+                data.iter().map(|p| p.payload.as_slice()).collect::<Vec<_>>()
+            ),
+        ));
+    }
+
+    let has_upre = data.iter().any(|p| p.channel_index == 0 && p.payload.as_slice() == b"UPRE");
+    let has_tpre = data.iter().any(|p| p.channel_index == 1 && p.payload.as_slice() == b"TPRE");
+    let has_upost = data.iter().any(|p| p.channel_index == 0 && p.payload.as_slice() == b"UPOST");
+    let has_tpost = data.iter().any(|p| p.channel_index == 1 && p.payload.as_slice() == b"TPOST");
+    if !(has_upre && has_tpre && has_upost && has_tpost) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "两路均应有暂停前后 data: upre={has_upre} tpre={has_tpre} upost={has_upost} tpost={has_tpost}"
+            ),
+        ));
+    }
+
+    let pre_last = data
+        .iter()
+        .filter(|p| {
+            let pl = p.payload.as_slice();
+            pl == b"UPRE" || pl == b"TPRE"
+        })
+        .map(|p| p.relative_us)
+        .max()
+        .unwrap_or(0);
+    let post_first = data
+        .iter()
+        .filter(|p| {
+            let pl = p.payload.as_slice();
+            pl == b"UPOST" || pl == b"TPOST"
+        })
+        .map(|p| p.relative_us)
+        .min()
+        .unwrap_or(u64::MAX);
+    if post_first < pre_last {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("共享轴恢复后相对戳应 ≥ 暂停前: post={post_first} pre={pre_last}"),
+        ));
+    }
+    let gap = post_first.saturating_sub(pre_last);
+    let pause_us = pause_wall.as_micros() as u64;
+    if gap >= pause_us {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("多路共享轴间隔应远小于暂停墙钟: gap={gap}us pause_wall={pause_us}us"),
+        ));
+    }
+
+    eprintln!("  控制面多路 record.pause/resume（无推送/无落盘）：通过");
+    Ok(())
+}
+
+/// 在窗口内统计 `record.packet` 推送条数（忽略其它帧）。
+fn count_record_packet_events(client: &mut TcpStream, window: Duration) -> io::Result<usize> {
+    let mut n = 0usize;
+    client.set_read_timeout(Some(Duration::from_millis(40)))?;
+    let deadline = Instant::now() + window;
+    while Instant::now() < deadline {
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"record.packet\"") {
+                    n += 1;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(e) => {
+                client.set_read_timeout(Some(Duration::from_secs(5)))?;
+                return Err(e);
+            }
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+    Ok(n)
+}
+
+/// 暂停观察：周期向 UDP/TCP 灌丢弃载荷，同时统计是否仍有 `record.packet`。
+fn pump_and_count_packet_events(
+    client: &mut TcpStream,
+    udp_tx: &UdpSocket,
+    udp_addr: SocketAddr,
+    tcp_tx: &mut TcpStream,
+    window: Duration,
+) -> io::Result<usize> {
+    let mut n = 0usize;
+    client.set_read_timeout(Some(Duration::from_millis(30)))?;
+    let deadline = Instant::now() + window;
+    let mut next_pump = Instant::now();
+    while Instant::now() < deadline {
+        if Instant::now() >= next_pump {
+            let _ = udp_tx.send_to(b"UDROP", udp_addr);
+            let _ = tcp_tx.write_all(b"TDROP");
+            next_pump = Instant::now() + Duration::from_millis(40);
+        }
+        match read_text_frame(client) {
+            Ok(Some(frame)) => {
+                if frame.contains("\"event\":\"record.packet\"") {
+                    n += 1;
+                }
+            }
+            Ok(None) => break,
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(e) => {
+                client.set_read_timeout(Some(Duration::from_secs(5)))?;
+                return Err(e);
+            }
+        }
+    }
+    client.set_read_timeout(Some(Duration::from_secs(5)))?;
+    Ok(n)
 }
 
 fn extract_packet_count(json: &str) -> Option<u64> {
