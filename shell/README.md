@@ -20,6 +20,11 @@ cargo run
 
 可执行文件：`target/debug/fieldreplay.exe`（或 `release`）。
 
+## 应用图标
+
+资源在 `assets/fieldreplay.ico`（源稿 `fieldreplay.png`），经 `build.rs` 嵌入壳 EXE。  
+任务栏 / Alt+Tab 读同一资源；换标只需替换资源后重新编译或跑 `tools\pack_green.bat`。
+
 ## 绿色目录打包
 
 仓库根执行 `tools\pack_green.bat`：Release 编译引擎与壳、`npm run build` UI，组装到 `pack\FieldReplay\`（布局与下方默认查找路径一致），并跑 `--smoke`。
