@@ -1,7 +1,7 @@
 # E2E-3: local sniff — listen TCP and print LASER lines (stand-in before FieldReplay)
 param(
   [string]$BindHost = "127.0.0.1",
-  [int]$Port = 57002,
+  [int]$Port = 58002,
   [int]$Seconds = 10
 )
 $ErrorActionPreference = "Stop"

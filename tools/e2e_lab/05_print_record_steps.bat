@@ -19,7 +19,7 @@ echo   pack\FieldReplay\fieldreplay.exe
 echo.
 echo [C] UI channels - start empty, then ADD:
 echo   UDP   0.0.0.0:56001
-echo   TCP   0.0.0.0:57002   (server listen)
+echo   TCP   0.0.0.0:58002   (server listen)
 echo   MQTT  127.0.0.1:1883, e2e/sensor
 echo   VIDEO rtsp://127.0.0.1:8554/live/cam1  (optional)
 echo   (no serial unless you have COM)

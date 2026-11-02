@@ -25,12 +25,13 @@ RTSP windows from E2E-1 can stay open; not required for this step.
 
 **Order differs from UDP:** listen first (TCP needs accept).
 
-1. Run `03_run_tcp_recv.bat` FIRST — listens `127.0.0.1:57002`
+1. Run `03_run_tcp_recv.bat` FIRST — listens `127.0.0.1:58002`
 2. Within a few seconds, run `03_start_tcp_send.bat` (keep open) — sends `LASER,...` lines
 3. Recv window should print several `recv #n : LASER,...` and `PASS`
 4. Tell the guide "TCP OK" when PASS
 
-Port `57002` (not `56xxx`): Hyper-V often reserves `56xxx` for TCP listen.
+Port `58002`: Hyper-V excluded TCP ranges drift (old `57002` fell into `56923-57022`).
+Before changing ports, check `netsh interface ipv4 show excludedportrange protocol=tcp`.
 UDP E2E-2 can stay open (`56001`).
 
 ## E2E-4: MQTT Broker + publish
@@ -60,7 +61,7 @@ during this step — FieldReplay replaces those receivers.
 2. `04_start_mqtt_broker.bat` then `04_start_mqtt_pub.bat`
 3. `02_start_udp_send.bat` (STAT -> `127.0.0.1:56001`)
 4. **TCP sender later** — start only AFTER FieldReplay is already recording
-   (FR listens `:57002`; then `03_start_tcp_send.bat`)
+   (FR listens `:58002`; then `03_start_tcp_send.bat`)
 
 ### B. Launch app
 
@@ -75,7 +76,7 @@ Start with **empty** channels (no demo presets). Use **添加通道**:
 | Name | Type | Param |
 |------|------|-------|
 | e2e-udp | UDP | `0.0.0.0:56001` |
-| e2e-tcp | TCP | `0.0.0.0:57002` (engine role defaults to server) |
+| e2e-tcp | TCP | `0.0.0.0:58002` (engine role defaults to server) |
 | e2e-mqtt | MQTT | `127.0.0.1:1883, e2e/sensor` (TLS off) |
 | e2e-video | 视频 RTP | `rtsp://127.0.0.1:8554/live/cam1` (optional) |
 

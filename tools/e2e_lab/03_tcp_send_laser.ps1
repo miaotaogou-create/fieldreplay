@@ -1,7 +1,7 @@
-# E2E-3: fake device — periodic TCP LASER lines to 127.0.0.1:56002
+# E2E-3: fake device — periodic TCP LASER lines to 127.0.0.1:58002
 param(
   [string]$HostAddr = "127.0.0.1",
-  [int]$Port = 57002,
+  [int]$Port = 58002,
   [int]$IntervalMs = 200,
   [int]$Count = 0,
   [int]$ConnectWaitSec = 30
