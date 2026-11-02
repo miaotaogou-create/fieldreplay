@@ -131,3 +131,37 @@ Before changing TCP ports: `netsh interface ipv4 show excludedportrange protocol
 3. `06_run_mqtt_host_sub.bat` — expect `SENSOR,...` and `PASS`
 
 Say **E2E-6 OK** when all three PASS. Do not start E2E-7 until then.
+
+## E2E-7: FieldReplay replay → fake host
+
+Uses E2E-5 `.fcap` (example: `Downloads\现场捕获包_2026-11-02_9530.fcap`,
+4 ch / ~1315 pkts / ~46s). Remap sinks to E2E-6 host ports (UI defaults differ).
+
+| Session ch | Type | Replay target |
+|------------|------|---------------|
+| 0 | UDP | `127.0.0.1:56101` |
+| 1 | MQTT | Broker `127.0.0.1:1883` (topics from frames / empty prefix) |
+| 2 | video | optional; skip for text host check |
+| 3 | TCP | `127.0.0.1:58102` (host listen; replay client) |
+
+### Automated (preferred for lab gate)
+
+```
+07_run_aligned_replay.bat
+```
+
+Starts broker + UDP/TCP/MQTT hosts + engine `serve`, opens the `.fcap`,
+`replay.start` with `targets[]` (speed default 8), expects `STAT` / `LASER` /
+`SENSOR` and host PASS. Override path:  
+`powershell -File 07_run_aligned_replay.ps1 -Fcap "D:\path\to.fcap"`
+
+### Manual UI path
+
+Print checklist: `07_print_replay_steps.bat`
+
+1. Start hosts (`04_start_mqtt_broker` + `06_run_*` with long enough window)
+2. Open app → Replay → load `.fcap`
+3. Remap multi-targets to table above; start replay
+4. Host windows show readable `STAT` / `LASER` / `SENSOR`
+
+Say **E2E-7 OK** when all three channels show aligned readable lines.

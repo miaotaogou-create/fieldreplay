@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E2E-7** 重演 → 假上位机对齐；E2E-6 已 PASS（UDP `56101` / TCP `58102` / MQTT `e2e/#`） |
+| **下一步** | **无默认主线**（现场再选）；E2E Lab 1～7 已收口；E15 仍搁置 |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -234,7 +234,7 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → 当前主线 **E2E Lab**（`docs/requirements/20261030-e2e-lab.md`）；产品轨 R2/E16 已收口，**E15 搁置**
+1. 读 `PROGRESS.md` → **无默认主线**（E2E Lab 已收口；产品轨 R2/E16 已收口，**E15 搁置**）；现场再选定下一条
 2. 做完勾选、填完成记录、提交推送；E2E 一次只带一格手测
 3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
@@ -243,7 +243,7 @@ fieldreplay/
 7. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
 8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
 9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
-10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～6 已过；**下一步 E2E-7** 重演灌假上位机
+10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～7 已过；闸门 `07_run_aligned_replay.bat`
 11. **U9 已收口**：通道卡片右键编辑/删除
 12. **假上位机口**：UDP `56101` / TCP `58102` / MQTT `e2e/#`（录制侧仍为 `56001`/`58002`）
 
@@ -304,3 +304,4 @@ fieldreplay/
 | 2026-11-02 | U9 需求入库（通道卡片右键编辑/删除） | 现场缺改参/删卡；类型不可改；录制中/暂停禁改删；拦系统菜单；悬停/双击锦上添花；不打断 E2E-6 |
 | 2026-11-02 | U9 实现收口 | 右键菜单 + ChannelEditorModal；表单抽 `channelForm`；App 增 update/remove；下一步仍 E2E-6 |
 | 2026-11-02 | E2E-6 假上位机收显收口 | 夹具 `06_*`；口 UDP 56101 / TCP 58102 / MQTT e2e/#；三路 PASS；下一步 E2E-7 |
+| 2026-11-02 | E2E-7 重演→假上位机收口；E2E Lab 全轨过 | `07_run_aligned_replay`：WS targets[] UDP/MQTT/TCP；STAT/LASER/SENSOR PASS；无默认下一主线 |
