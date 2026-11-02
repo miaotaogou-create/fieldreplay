@@ -95,3 +95,39 @@ Do not add serial unless you have a COM pair.
 Fail checks: serial still enabled; TCP sender started before FR listen;
 old `*_recv` / mqtt-sub still bound on the same ports; engine disconnected
 (export falls back to JSON demo — not PASS).
+
+## E2E-6: fake host minimal receive (UDP / TCP / MQTT)
+
+Stand-in **上位机** sinks for E2E-7 replay. Ports are **not** the record-side
+device ports (`56001` / `58002`).
+
+| Role | Endpoint |
+|------|----------|
+| UDP host | `127.0.0.1:56101` |
+| TCP host | `127.0.0.1:58102` (listen; probe/replay connect as client) |
+| MQTT host | Broker `127.0.0.1:1883`, subscribe `e2e/#` |
+
+Print checklist: `06_print_host_steps.bat`
+
+### [1] UDP
+
+1. `06_run_udp_host.bat`
+2. `06_start_udp_probe.bat` (sends `STAT,...` to `:56101`)
+3. Expect text + hex lines and `PASS`
+
+### [2] TCP (listen first)
+
+1. `06_run_tcp_host.bat`
+2. Then `06_start_tcp_probe.bat` (sends `LASER,...` to `:58102`)
+3. Expect text + hex lines and `PASS`
+
+Before changing TCP ports: `netsh interface ipv4 show excludedportrange protocol=tcp`
+(`58102` chosen outside Hyper-V excluded ranges on the lab PC).
+
+### [3] MQTT
+
+1. `04_start_mqtt_broker.bat`
+2. `04_start_mqtt_pub.bat`
+3. `06_run_mqtt_host_sub.bat` — expect `SENSOR,...` and `PASS`
+
+Say **E2E-6 OK** when all three PASS. Do not start E2E-7 until then.

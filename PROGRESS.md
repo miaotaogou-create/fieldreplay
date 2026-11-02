@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **E2E-6** 假上位机最小收显（UDP/TCP/MQTT）；E2E-5 已 PASS（4 路 / ~1315 帧 / ~0.89 MB，TCP 口 58002） |
+| **下一步** | **E2E-7** 重演 → 假上位机对齐；E2E-6 已 PASS（UDP `56101` / TCP `58102` / MQTT `e2e/#`） |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -243,8 +243,9 @@ fieldreplay/
 7. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
 8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
 9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
-10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～5 已过；**下一步 E2E-6** 假上位机收显
-11. **U9 已收口**：通道卡片右键编辑/删除；联调主线仍为 **E2E-6**
+10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～6 已过；**下一步 E2E-7** 重演灌假上位机
+11. **U9 已收口**：通道卡片右键编辑/删除
+12. **假上位机口**：UDP `56101` / TCP `58102` / MQTT `e2e/#`（录制侧仍为 `56001`/`58002`）
 
 ## 决策记录（追加）
 
@@ -302,3 +303,4 @@ fieldreplay/
 | 2026-10-30 | **选定 R2**（先于 E15）并全轨收口 | 补 R1 控制面 multi `targets[]` WS 洞；E15 搁置；无默认主线 |
 | 2026-11-02 | U9 需求入库（通道卡片右键编辑/删除） | 现场缺改参/删卡；类型不可改；录制中/暂停禁改删；拦系统菜单；悬停/双击锦上添花；不打断 E2E-6 |
 | 2026-11-02 | U9 实现收口 | 右键菜单 + ChannelEditorModal；表单抽 `channelForm`；App 增 update/remove；下一步仍 E2E-6 |
+| 2026-11-02 | E2E-6 假上位机收显收口 | 夹具 `06_*`；口 UDP 56101 / TCP 58102 / MQTT e2e/#；三路 PASS；下一步 E2E-7 |
