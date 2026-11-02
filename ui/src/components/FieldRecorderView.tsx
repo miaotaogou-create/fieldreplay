@@ -16,10 +16,6 @@ import {
   createMqttPacket,
 } from '../utils/mockFieldData';
 import {
-  formatSerialLineSummary,
-  parseSerialParamLine,
-} from '../utils/serialParams';
-import {
   Play,
   Square,
   Pause,
@@ -31,11 +27,19 @@ import {
   BookmarkPlus,
 } from 'lucide-react';
 import { listRecordChannels } from '../engine/channelConfig';
+import { formatSerialLineSummary } from '../utils/serialParams';
+import {
+  ChannelCardContextMenu,
+  type ChannelCardContextMenuState,
+} from './ChannelCardContextMenu';
+import { ChannelEditorModal } from './ChannelEditorModal';
 
 interface FieldRecorderViewProps {
   channels: ChannelConfig[];
   onToggleChannel: (id: string) => void;
   onAddChannel: (channel: ChannelConfig) => void;
+  onUpdateChannel: (channel: ChannelConfig) => void;
+  onRemoveChannel: (id: string) => void;
   recordedPackets: CapturedPacket[];
   onAppendPacket: (packet: CapturedPacket) => void;
   onClearSession: () => void;
@@ -58,12 +62,12 @@ interface FieldRecorderViewProps {
   recordFaultSeq?: number;
 }
 
-const FALLBACK_SERIAL_PORTS = ['COM1', 'COM2', 'COM3', 'COM4', 'COM10', 'COM11'];
-
 export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   channels,
   onToggleChannel,
   onAddChannel,
+  onUpdateChannel,
+  onRemoveChannel,
   recordedPackets,
   onAppendPacket,
   onClearSession,
@@ -97,45 +101,10 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [alsoExportPcap, setAlsoExportPcap] = useState(false);
-  const [showAddChannelModal, setShowAddChannelModal] = useState(false);
-
-  // New channel state
-  const [newChanName, setNewChanName] = useState('COM4 (力矩传感器)');
-  const [newChanType, setNewChanType] = useState<
-    'serial' | 'udp' | 'tcp' | 'mqtt' | 'video_stream'
-  >('serial');
-  const [newChanParam, setNewChanParam] = useState('COM4, 921600, 8-N-1');
-  const [newChanMqttTls, setNewChanMqttTls] = useState(false);
-  const [newChanMqttCa, setNewChanMqttCa] = useState('');
-  const [newChanMqttSni, setNewChanMqttSni] = useState('');
-  const [serialPorts, setSerialPorts] = useState<string[]>([...FALLBACK_SERIAL_PORTS]);
-  const [serialListHint, setSerialListHint] = useState<string | null>(null);
-
-  const refreshSerialPorts = async () => {
-    if (!engineConnected || !onListSerialPorts) {
-      setSerialPorts([...FALLBACK_SERIAL_PORTS]);
-      setSerialListHint('引擎未连接，使用本地兜底列表');
-      return;
-    }
-    try {
-      const ports = await onListSerialPorts();
-      setSerialPorts(ports.length ? ports : [...FALLBACK_SERIAL_PORTS]);
-      const parsed = parseSerialParamLine(newChanParam);
-      setSerialListHint(
-        ports.length === 0
-          ? `本机未枚举到 COM，已用兜底列表 · 当前 ${parsed.portName} @ ${formatSerialLineSummary(parsed)}`
-          : `本机 ${ports.length} 个串口 · 当前 ${parsed.portName} @ ${formatSerialLineSummary(parsed)}`
-      );
-    } catch (e) {
-      setSerialListHint(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  useEffect(() => {
-    if (!showAddChannelModal || newChanType !== 'serial') return;
-    void refreshSerialPorts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAddChannelModal, newChanType, engineConnected]);
+  const [channelEditor, setChannelEditor] = useState<
+    null | { mode: 'add' } | { mode: 'edit'; channel: ChannelConfig }
+  >(null);
+  const [cardMenu, setCardMenu] = useState<ChannelCardContextMenuState | null>(null);
 
   // Auto-scroll log
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -356,60 +325,31 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     setIsExportModalOpen(true);
   };
 
-  const handleCreateChannel = (e: React.FormEvent) => {
+  const channelActionsLocked =
+    recordState === 'recording' || recordState === 'paused';
+  const channelLockReason = '请先停止录制';
+
+  const openCardMenu = (
+    e: React.MouseEvent,
+    chan: ChannelConfig
+  ) => {
     e.preventDefault();
-    const isMqtt = newChanType === 'mqtt';
-    const isSerial = newChanType === 'serial';
-    const isVideo = newChanType === 'video_stream';
-    const paramTrim = newChanParam.trim();
-    const isRtsp = isVideo && paramTrim.toLowerCase().startsWith('rtsp://');
-    const hostPort = !isRtsp && newChanParam.includes(':')
-      ? newChanParam.split(':')
-      : [isVideo ? '0.0.0.0' : '127.0.0.1', newChanParam];
-    const listenIp = hostPort[0]?.trim() || (isVideo ? '0.0.0.0' : '127.0.0.1');
-    const listenPort = Number(hostPort[1]?.trim()) || (isVideo ? 5004 : 8888);
-    const serialParsed = isSerial ? parseSerialParamLine(newChanParam) : null;
-    const newChan: ChannelConfig = {
-      id: `ch_custom_${Date.now()}`,
-      name: newChanName,
-      type: newChanType,
-      enabled: true,
-      color: isVideo ? '#7c3aed' : isMqtt ? '#0d9488' : '#0891b2',
-      params: {
-        portName: serialParsed?.portName,
-        baudRate: serialParsed?.baudRate,
-        dataBits: serialParsed?.dataBits,
-        stopBits: serialParsed?.stopBits,
-        parity: serialParsed?.parity,
-        ip: !isSerial && !isMqtt ? (isRtsp ? '0.0.0.0' : listenIp) : undefined,
-        port: !isSerial && !isMqtt ? (isRtsp ? 0 : listenPort) : undefined,
-        streamUrl: isRtsp ? paramTrim : undefined,
-        mqttBroker: isMqtt ? (newChanParam.split(',')[0]?.trim() || '127.0.0.1:1883') : undefined,
-        mqttTopic: isMqtt ? (newChanParam.split(',')[1]?.trim() || 'factory/+/telemetry') : undefined,
-        mqttQoS: isMqtt ? 1 : undefined,
-        mqttUsername: isMqtt
-          ? (newChanParam.split(',')[2]?.trim() || undefined)
-          : undefined,
-        mqttPassword: isMqtt
-          ? (newChanParam.split(',')[3]?.trim() || undefined)
-          : undefined,
-        mqttTls: isMqtt ? newChanMqttTls : undefined,
-        mqttCaCertPath:
-          isMqtt && newChanMqttTls && newChanMqttCa.trim()
-            ? newChanMqttCa.trim()
-            : undefined,
-        mqttTlsServerName:
-          isMqtt && newChanMqttTls && newChanMqttSni.trim()
-            ? newChanMqttSni.trim()
-            : undefined,
-      },
-      connected: true,
-      rxBytes: 0,
-      rxFrames: 0,
-      currentRateBps: 0,
-    };
-    onAddChannel(newChan);
-    setShowAddChannelModal(false);
+    e.stopPropagation();
+    setCardMenu({
+      channelId: chan.id,
+      channelName: chan.name,
+      x: e.clientX,
+      y: e.clientY,
+    });
+  };
+
+  const handleDeleteChannel = (id: string, name: string) => {
+    if (channelActionsLocked) {
+      setLocalHint(channelLockReason);
+      return;
+    }
+    if (!window.confirm(`确定删除通道「${name}」？`)) return;
+    onRemoveChannel(id);
   };
 
   const formatTimer = (ms: number) => {
@@ -512,7 +452,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               ① 现场输入信道
             </span>
             <button
-              onClick={() => setShowAddChannelModal(true)}
+              onClick={() => setChannelEditor({ mode: 'add' })}
               className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -523,7 +463,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
           {channels.length === 0 && (
             <button
               type="button"
-              onClick={() => setShowAddChannelModal(true)}
+              onClick={() => setChannelEditor({ mode: 'add' })}
               className="w-full mb-2 px-3 py-4 rounded-lg border border-dashed border-slate-300 bg-slate-50/80 text-left hover:border-sky-400 hover:bg-sky-50/50 transition-colors"
             >
               <div className="text-xs font-medium text-slate-700">尚无通道</div>
@@ -538,6 +478,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               <div
                 key={chan.id}
                 onClick={() => onToggleChannel(chan.id)}
+                onContextMenu={(e) => openCardMenu(e, chan)}
                 className={`cursor-pointer px-2 py-1.5 rounded-md border transition-all text-left relative ${
                   chan.enabled
                     ? 'bg-slate-50 border-slate-300 shadow-xs ring-1 ring-sky-500/20'
@@ -1036,181 +977,46 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         </div>
       )}
 
-      {/* Add Custom Channel Modal */}
-      {showAddChannelModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <form
-            onSubmit={handleCreateChannel}
-            className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs"
-          >
-            <h3 className="text-base font-bold text-slate-900">添加输入通道</h3>
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">通道名称</label>
-              <input
-                type="text"
-                value={newChanName}
-                onChange={(e) => setNewChanName(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 focus:bg-white"
-                required
-              />
-            </div>
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">接口类型</label>
-              <div className="grid grid-cols-5 gap-1.5">
-                {([
-                  { id: 'serial' as const, label: '串口' },
-                  { id: 'udp' as const, label: 'UDP' },
-                  { id: 'tcp' as const, label: 'TCP' },
-                  { id: 'mqtt' as const, label: 'MQTT' },
-                  { id: 'video_stream' as const, label: '视频 RTP' },
-                ]).map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => {
-                      setNewChanType(t.id);
-                      if (t.id === 'serial') setNewChanParam('COM4, 921600, 8-N-1');
-                      else if (t.id === 'mqtt') {
-                        setNewChanParam('127.0.0.1:1883, factory/+/telemetry');
-                        setNewChanMqttTls(false);
-                        setNewChanMqttCa('');
-                        setNewChanMqttSni('');
-                      } else if (t.id === 'video_stream') setNewChanParam('0.0.0.0:5004');
-                      else setNewChanParam('0.0.0.0:8888');
-                    }}
-                    className={`py-2 px-1 rounded-lg font-medium border text-center leading-tight ${
-                      newChanType === t.id
-                        ? 'bg-sky-50 text-sky-700 border-sky-300'
-                        : 'bg-white text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block font-medium text-slate-700 mb-1">
-                {newChanType === 'serial'
-                  ? '串口参数'
-                  : newChanType === 'mqtt'
-                  ? 'Broker、Topic、可选用户名/密码'
-                  : newChanType === 'video_stream'
-                  ? 'RTP/UDP 监听或 RTSP URL（不解编码）'
-                  : '监听地址'}
-              </label>
-              {newChanType === 'serial' && (
-                <div className="flex items-center gap-2 mb-1.5">
-                  <select
-                    value={newChanParam.split(',')[0]?.trim() || serialPorts[0] || 'COM3'}
-                    onChange={(e) => {
-                      const rest = newChanParam.includes(',')
-                        ? newChanParam.slice(newChanParam.indexOf(','))
-                        : ', 115200, 8-N-1';
-                      setNewChanParam(`${e.target.value}${rest}`);
-                    }}
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-900 font-mono focus:bg-white"
-                  >
-                    {Array.from(
-                      new Set(
-                        [newChanParam.split(',')[0]?.trim(), ...serialPorts].filter(
-                          (p): p is string => !!p
-                        )
-                      )
-                    ).map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => void refreshSerialPorts()}
-                    className="px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shrink-0"
-                  >
-                    刷新
-                  </button>
-                </div>
-              )}
-              {newChanType === 'serial' && serialListHint && (
-                <p className="text-[10px] text-slate-500 mb-1">{serialListHint}</p>
-              )}
-              <input
-                type="text"
-                value={newChanParam}
-                onChange={(e) => setNewChanParam(e.target.value)}
-                placeholder={
-                  newChanType === 'serial'
-                    ? 'COM4, 921600, 8-N-1'
-                    : newChanType === 'mqtt'
-                    ? '127.0.0.1:1883, factory/+/telemetry[, user, pass]'
-                    : newChanType === 'video_stream'
-                    ? '0.0.0.0:5004 或 rtsp://host:554/live'
-                    : '0.0.0.0:8888'
-                }
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-900 focus:bg-white"
-                required
-              />
-              {newChanType === 'mqtt' && (
-                <div className="mt-2 space-y-1.5">
-                  <label className="flex items-center gap-2 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={newChanMqttTls}
-                      onChange={(e) => {
-                        const on = e.target.checked;
-                        setNewChanMqttTls(on);
-                        if (on && newChanParam.startsWith('127.0.0.1:1883')) {
-                          setNewChanParam(
-                            newChanParam.replace('127.0.0.1:1883', '127.0.0.1:8883')
-                          );
-                        } else if (!on && newChanParam.startsWith('127.0.0.1:8883')) {
-                          setNewChanParam(
-                            newChanParam.replace('127.0.0.1:8883', '127.0.0.1:1883')
-                          );
-                        }
-                      }}
-                    />
-                    TLS（mqtts，常用口 8883）
-                  </label>
-                  {newChanMqttTls && (
-                    <>
-                      <input
-                        type="text"
-                        value={newChanMqttCa}
-                        onChange={(e) => setNewChanMqttCa(e.target.value)}
-                        placeholder="CA PEM 路径（可选；空=系统根）"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-mono focus:bg-white"
-                      />
-                      <input
-                        type="text"
-                        value={newChanMqttSni}
-                        onChange={(e) => setNewChanMqttSni(e.target.value)}
-                        placeholder="TLS 服务器名 / SNI（可选）"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-mono focus:bg-white"
-                      />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowAddChannelModal(false)}
-                className="px-4 py-2 text-slate-600 hover:text-slate-800"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                className="px-4 py-2 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800"
-              >
-                确认添加
-              </button>
-            </div>
-          </form>
-        </div>
+      {channelEditor && (
+        <ChannelEditorModal
+          mode={channelEditor.mode}
+          initialChannel={
+            channelEditor.mode === 'edit' ? channelEditor.channel : undefined
+          }
+          engineConnected={engineConnected}
+          onListSerialPorts={onListSerialPorts}
+          onClose={() => setChannelEditor(null)}
+          onSubmit={(ch) => {
+            if (channelEditor.mode === 'edit') {
+              if (channelActionsLocked) {
+                setLocalHint(channelLockReason);
+                return;
+              }
+              onUpdateChannel(ch);
+            } else {
+              onAddChannel(ch);
+            }
+            setChannelEditor(null);
+          }}
+        />
+      )}
+
+      {cardMenu && (
+        <ChannelCardContextMenu
+          menu={cardMenu}
+          actionsLocked={channelActionsLocked}
+          lockReason={channelLockReason}
+          onClose={() => setCardMenu(null)}
+          onEdit={(id) => {
+            if (channelActionsLocked) {
+              setLocalHint(channelLockReason);
+              return;
+            }
+            const ch = channels.find((c) => c.id === id);
+            if (ch) setChannelEditor({ mode: 'edit', channel: ch });
+          }}
+          onDelete={handleDeleteChannel}
+        />
       )}
     </div>
   );

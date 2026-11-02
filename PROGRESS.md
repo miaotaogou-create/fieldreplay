@@ -25,7 +25,7 @@
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
 | **下一步** | **E2E-6** 假上位机最小收显（UDP/TCP/MQTT）；E2E-5 已 PASS（4 路 / ~1315 帧 / ~0.89 MB，TCP 口 58002） |
-| **备选 U9** | 录制通道卡片右键编辑/删除；需求已确认：`docs/requirements/20261102-channel-card-context-menu.md`（不打断 E2E） |
+| **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
 | 启动控制台 | **已改**：壳 `windows_subsystem=windows`；双击不再弹黑框；失败 MessageBox；`--smoke` 仍打日志 |
@@ -80,7 +80,7 @@ fieldreplay/
 | U6 | 对接说明页对照原型（本步只改 `QtArchitectureGuide`）；产品文案去「仅 Qt」口吻若需通用化 | [x] | 2026-10-29：文案改「上位机通用 + Qt 示例」；挂载串口/UDP 与 `.fcap` 示意块（原型死代码补齐）；保留 Q1–Q3 结构 |
 | U7 | 顶栏 / 四 Tab 切换 / Toast（本步只改 `Header`+`App`）对照原型 | [x] | 2026-10-29：Tab「对接说明」对齐需求 IA；aria-current；Toast 连点重置计时+role=status；页脚去仅 Qt 口吻 |
 | U8 | 界面阶段验收：`npm run dev` 手测四页主路径；在进度本记「通过/缺口」清单 | [x] | 2026-10-29：**通过**（见下方 U8 清单）；`npm run lint` 通过 |
-| U9 | 录制页通道卡片右键：编辑 / 删除（拦系统菜单；录制中禁改删） | [ ] | 2026-11-02：需求已确认；见 `docs/requirements/20261102-channel-card-context-menu.md`；**备选**，不打断 E2E |
+| U9 | 录制页通道卡片右键：编辑 / 删除（拦系统菜单；录制中禁改删） | [x] | 2026-11-02：插队实现；右键菜单 + 编辑弹窗（类型只读）；录制中/暂停禁用；`channelForm.selfcheck` + `npm run lint/build` 过 |
 
 ### U8 手测清单（2026-10-29，`npm run dev` @ localhost:3000）
 
@@ -244,7 +244,7 @@ fieldreplay/
 8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
 9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
 10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～5 已过；**下一步 E2E-6** 假上位机收显
-11. **备选 U9**：通道卡片右键编辑/删除；规格见 `docs/requirements/20261102-channel-card-context-menu.md`；现场选定后再开写码
+11. **U9 已收口**：通道卡片右键编辑/删除；联调主线仍为 **E2E-6**
 
 ## 决策记录（追加）
 
@@ -301,3 +301,4 @@ fieldreplay/
 | 2026-10-30 | E16d / E16 全轨收口 | 多路 UDP+TCP 共享轴 pause 自检；暂停期无推送/无落盘；下一主线现场选定（E15 或其它） |
 | 2026-10-30 | **选定 R2**（先于 E15）并全轨收口 | 补 R1 控制面 multi `targets[]` WS 洞；E15 搁置；无默认主线 |
 | 2026-11-02 | U9 需求入库（通道卡片右键编辑/删除） | 现场缺改参/删卡；类型不可改；录制中/暂停禁改删；拦系统菜单；悬停/双击锦上添花；不打断 E2E-6 |
+| 2026-11-02 | U9 实现收口 | 右键菜单 + ChannelEditorModal；表单抽 `channelForm`；App 增 update/remove；下一步仍 E2E-6 |

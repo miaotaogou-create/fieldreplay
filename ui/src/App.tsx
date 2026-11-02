@@ -215,6 +215,23 @@ export default function App() {
     showToast(`已成功添加通道: ${newChan.name}`);
   };
 
+  const handleUpdateChannel = (updated: ChannelConfig) => {
+    setChannels((prev) =>
+      prev.map((c) => (c.id === updated.id ? updated : c))
+    );
+    showToast(`已更新通道: ${updated.name}`);
+  };
+
+  const handleRemoveChannel = (id: string) => {
+    let removedName = id;
+    setChannels((prev) => {
+      const hit = prev.find((c) => c.id === id);
+      if (hit) removedName = hit.name;
+      return prev.filter((c) => c.id !== id);
+    });
+    showToast(`已删除通道: ${removedName}`);
+  };
+
   const handleAppendPacket = (packet: CapturedPacket) => {
     setRecordedPackets((prev) => [...prev, packet]);
   };
@@ -764,6 +781,8 @@ export default function App() {
             channels={channels}
             onToggleChannel={handleToggleChannel}
             onAddChannel={handleAddChannel}
+            onUpdateChannel={handleUpdateChannel}
+            onRemoveChannel={handleRemoveChannel}
             recordedPackets={recordedPackets}
             onAppendPacket={handleAppendPacket}
             onClearSession={handleClearSession}
