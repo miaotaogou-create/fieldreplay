@@ -33,6 +33,8 @@ import {
   type ChannelCardContextMenuState,
 } from './ChannelCardContextMenu';
 import { ChannelEditorModal } from './ChannelEditorModal';
+import { RecordOutputPathRow } from './RecordOutputPathRow';
+import { requestDefaultRecordPath } from '../shell/recordPath';
 
 interface FieldRecorderViewProps {
   channels: ChannelConfig[];
@@ -49,7 +51,11 @@ interface FieldRecorderViewProps {
   ) => void | Promise<void>;
   onGoToReplay: () => void;
   engineConnected: boolean;
-  onEngineStartRecord: (channels: ChannelConfig[]) => Promise<void>;
+  /** U10c：开录须带绝对路径 out */
+  onEngineStartRecord: (
+    channels: ChannelConfig[],
+    out: string
+  ) => Promise<{ out?: string } | void>;
   onEngineStopRecord: () => Promise<unknown>;
   /** E16c：录制暂停 / 继续（相对轴冻结） */
   onEnginePauseRecord?: () => Promise<unknown>;
@@ -90,10 +96,24 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
   const [simulateHardwareStream, setSimulateHardwareStream] = useState(!engineConnected);
   const [busy, setBusy] = useState(false);
   const [localHint, setLocalHint] = useState<string | null>(null);
+  /** U10c：将要 / 实际写入的 .fcap 绝对路径 */
+  const [outputPath, setOutputPath] = useState('');
 
   useEffect(() => {
     if (engineConnected) setSimulateHardwareStream(false);
   }, [engineConnected]);
+
+  // 挂载时向壳要默认 EXE\record\日期\….fcap
+  useEffect(() => {
+    let cancelled = false;
+    void requestDefaultRecordPath().then((path) => {
+      if (cancelled || !path) return;
+      setOutputPath((cur) => cur || path);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [siteNotes, setSiteNotes] = useState('现场3号工位伺服偶现卡顿，录制10分钟正常及突发异常报文。');
   const [recordedBy, setRecordedBy] = useState('现场调试员-张工');
   const [siteLocation, setSiteLocation] = useState('苏州二厂自动化冲压车间');
@@ -223,10 +243,20 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
         );
         return;
       }
+      const out = outputPath.trim();
+      if (!out) {
+        setLocalHint('请填写或选择录制保存路径（壳内可点「默认」或「浏览」）');
+        return;
+      }
       setBusy(true);
       setLocalHint(null);
       try {
-        await onEngineStartRecord(selected);
+        const result = await onEngineStartRecord(selected, out);
+        const actual =
+          result && typeof result === 'object' && typeof result.out === 'string'
+            ? result.out.trim()
+            : '';
+        if (actual) setOutputPath(actual);
         setElapsedMs(0);
         setRecordState('recording');
       } catch (e) {
@@ -281,17 +311,27 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
     setRecordState('recording');
   };
 
+  const applyStopOut = (reply: unknown) => {
+    if (!reply || typeof reply !== 'object') return;
+    const out =
+      'out' in reply && typeof (reply as { out?: unknown }).out === 'string'
+        ? String((reply as { out: string }).out).trim()
+        : '';
+    if (out) setOutputPath(out);
+    const warn =
+      'warning' in reply
+        ? String((reply as { warning?: unknown }).warning ?? '')
+        : '';
+    if (warn) setLocalHint(warn);
+  };
+
   const handleStopAndPackage = async () => {
     if (engineConnected && recordState !== 'idle') {
       setBusy(true);
       try {
         const reply = await onEngineStopRecord();
         setRecordState('idle');
-        const warn =
-          reply && typeof reply === 'object' && 'warning' in reply
-            ? String((reply as { warning?: unknown }).warning ?? '')
-            : '';
-        if (warn) setLocalHint(warn);
+        applyStopOut(reply);
         setIsExportModalOpen(true);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -309,11 +349,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
       setBusy(true);
       try {
         const reply = await onEngineStopRecord();
-        const warn =
-          reply && typeof reply === 'object' && 'warning' in reply
-            ? String((reply as { warning?: unknown }).warning ?? '')
-            : '';
-        if (warn) setLocalHint(warn);
+        applyStopOut(reply);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/未在录制/.test(msg)) setLocalHint(msg);
@@ -674,6 +710,17 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
               </div>
             </div>
           </div>
+        </div>
+
+        {/* U10c：落盘路径（录中只读；开录传 record.start.out） */}
+        <div className="mt-2 pt-1.5 border-t border-slate-800/80">
+          <RecordOutputPathRow
+            value={outputPath}
+            onChange={setOutputPath}
+            readOnly={recordState === 'recording' || recordState === 'paused'}
+            disabled={busy}
+            onHint={setLocalHint}
+          />
         </div>
 
         {/* 引擎状态 / 离线模拟条 */}

@@ -236,13 +236,20 @@ export default function App() {
     setRecordedPackets((prev) => [...prev, packet]);
   };
 
-  const handleEngineStartRecord = async (selected: ChannelConfig[]) => {
+  const handleEngineStartRecord = async (
+    selected: ChannelConfig[],
+    out: string
+  ) => {
     const engine = engineRef.current;
     if (!engine?.connected) {
       throw new Error('引擎未连接');
     }
     if (selected.length === 0) {
       throw new Error('请至少启用一个可录制通道');
+    }
+    const outPath = out.trim();
+    if (!outPath) {
+      throw new Error('录制路径不能为空');
     }
     liveChannelsRef.current = selected.map((c) => ({
       id: c.id,
@@ -267,22 +274,23 @@ export default function App() {
       name: c.name,
       config: channelToEngineConfig(c),
     }));
-    if (channelPayloads.length === 1) {
-      const only = channelPayloads[0];
-      await engine.startRecord({
-        type: only.type,
-        name: only.name,
-        sessionTitle: title,
-        config: only.config,
-      });
-    } else {
-      await engine.startRecord({
-        sessionTitle: title,
-        channels: channelPayloads,
-      });
-    }
+    // U10c：正式 UI 必传 record.start.out
+    const startArgs = { sessionTitle: title, out: outPath };
+    const result =
+      channelPayloads.length === 1
+        ? await engine.startRecord({
+            ...startArgs,
+            type: channelPayloads[0].type,
+            name: channelPayloads[0].name,
+            config: channelPayloads[0].config,
+          })
+        : await engine.startRecord({
+            ...startArgs,
+            channels: channelPayloads,
+          });
     const summary = selected.map((c) => `${c.name}(${c.type})`).join('、');
-    showToast(`已开始真实录制：${summary}`);
+    showToast(`已开始真实录制：${summary} → ${result.out || outPath}`);
+    return result;
   };
 
   const handleEngineStopRecord = async () => {
@@ -292,11 +300,10 @@ export default function App() {
     }
     const result = await engine.stopRecord();
     liveChannelsRef.current = [];
-    const file = result.out.split(/[/\\]/).pop();
     showToast(
       result.warning
-        ? `录制已停止（${result.packetCount} 帧 / ${file}）：${result.warning}`
-        : `录制已停止：${result.packetCount} 帧已写入 ${file}`
+        ? `录制已停止（${result.packetCount} 帧）：${result.out} — ${result.warning}`
+        : `录制已停止：${result.packetCount} 帧已写入 ${result.out}`
     );
     return result;
   };
