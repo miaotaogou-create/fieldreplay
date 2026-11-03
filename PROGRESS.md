@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **U11c** UI：导出现场包 + 同时 pcap + 裁剪另存接线；规格 `docs/requirements/20261103-export-save-path.md`；**E15** 仍搁置 |
+| **下一步** | **无默认主线**（U11 已收口）；现场再选；**E15** 仍搁置 |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -183,7 +183,7 @@ fieldreplay/
 | F **R2** 控制面 multi targets WS | — | 补 R1 残留：`targets[]` 环回自检 | **已收口** |
 | G **交付抛光** | G2 | 单 EXE 自解压 | **已收口**（G2a–G2c） |
 | H **U10** 录制落盘 | — | EXE\record\日期 可见/可选 | **已收口**（U10a–c） |
-| I **U11** 导出改路径 | U11c | 导出现场包/裁剪另存磁盘路径 | **当前主线**（U11a–b 已收口） |
+| I **U11** 导出改路径 | — | 导出现场包/裁剪另存磁盘路径 | **已收口**（U11a–c） |
 
 #### U10 录制落盘路径
 
@@ -214,7 +214,7 @@ fieldreplay/
 |----|------|------|----------|
 | U11a | 需求入库（另存为落盘；pcap 同基名；裁剪同行；非目标） | [x] | 2026-11-03：`docs/requirements/20261103-export-save-path.md`；D-039 |
 | U11b | 壳：选定路径写入文件（复用/扩展另存为 IPC） | [x] | 2026-11-03：`export_io` + `write_file` IPC；UI 桥 `shellRpc`/`exportSave`；`cargo test`+`--smoke` OK |
-| U11c | UI：导出现场包 + 同时 pcap + 裁剪另存接线 | [ ] | |
+| U11c | UI：导出现场包 + 同时 pcap + 裁剪另存接线 | [x] | 2026-11-03：`App` 壳内另存为+`write_file`；pcap 同基名；裁剪同行；无壳仍下载；弹窗「另存为」；`npm run build`+壳 `--smoke` OK |
 
 #### E13 会话 trim + marker
 
@@ -268,9 +268,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **当前主线 U11c**（UI 导出/裁剪落盘接线）；规格 `docs/requirements/20261103-export-save-path.md`；**E15** 仍搁置
+1. 读 `PROGRESS.md` → **无默认主线**（U11 已收口）；**E15** 仍搁置；现场再选下一条
 2. 做完勾选、填完成记录、提交推送；一次对话默认只接一格
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2** / **U11a** / **U11b** 已收口；U11c 进行中；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2** / **U11** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`；或 `tools\pack_sfx.bat` → 双击 `pack\FieldReplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -350,3 +350,4 @@ fieldreplay/
 | 2026-11-03 | G2c / G2 全轨收口 | 空目录解压开窗、二次跳过、LocalAppData 回退、失败 MessageBox、绿包未回归；无默认主线（下一候选 U11） |
 | 2026-11-03 | **选定 U11**；U11a 需求入库 | 导出现场包/裁剪另存改磁盘路径；pcap 同基名旁路；见 `20261103-export-save-path.md`；下一格 U11b |
 | 2026-11-03 | U11b 收口：壳写入 + write_file IPC | `export_io`/`b64`；UI `shellRpc`+`exportSave`；复用 `pick_save_fcap`；下一格 U11c |
+| 2026-11-03 | U11c / U11 全轨收口 | 导出现场包/pcap/裁剪另存走壳另存为+`write_file`；取消不落盘；toast 含路径；无默认主线 |

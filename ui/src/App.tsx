@@ -30,6 +30,7 @@ import {
   metadataToFcapMeta,
 } from './engine/sessionMap';
 import { hasShellIpc, postShellCommand } from './shell/windowControls';
+import { pickAndWriteFcap, writePcapBesideFcap } from './shell/exportSave';
 import { AlertTriangle, Download } from 'lucide-react';
 import type { EngineStartReplayRequest } from './components/DevReplayerView';
 
@@ -465,7 +466,8 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = fileName.endsWith('.fcap') ? fileName : `${fileName}.fcap`;
+    // 无壳预览回落：已有后缀原样；否则默认 .fcap
+    a.download = /\.[a-z0-9]+$/i.test(fileName) ? fileName : `${fileName}.fcap`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -494,9 +496,20 @@ export default function App() {
         ) {
           throw new Error('引擎返回内容不是二进制 .fcap');
         }
-        const ab = new ArrayBuffer(bytes.byteLength);
-        new Uint8Array(ab).set(bytes);
-        downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);
+
+        // U11：壳内另存为写入；无壳预览仍走下载
+        let fcapPath = '';
+        if (hasShellIpc()) {
+          fcapPath = await pickAndWriteFcap(bytes, fileName);
+          if (!fcapPath) {
+            showToast('已取消导出');
+            return;
+          }
+        } else {
+          const ab = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(ab).set(bytes);
+          downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);
+        }
 
         if (alsoPcap) {
           try {
@@ -510,21 +523,43 @@ export default function App() {
             ) {
               throw new Error('引擎返回内容不是经典 .pcap');
             }
-            const pcapName = fileName.replace(/\.fcap$/i, '') + '.pcap';
-            const pab = new ArrayBuffer(pcap.bytes.byteLength);
-            new Uint8Array(pab).set(pcap.bytes);
-            downloadBlob(new Blob([pab], { type: 'application/vnd.tcpdump.pcap' }), pcapName);
-            showToast(
-              `已导出 .fcap 与 .pcap（写入 ${pcap.written} 帧，跳过 ${pcap.skipped}）`
-            );
+            if (fcapPath) {
+              const pcapPath = await writePcapBesideFcap(fcapPath, pcap.bytes);
+              if (pcapPath) {
+                showToast(
+                  `已导出 .fcap 与 .pcap（写入 ${pcap.written} 帧，跳过 ${pcap.skipped}）\n${fcapPath}\n${pcapPath}`
+                );
+              } else {
+                showToast(`已导出 .fcap；pcap 写入失败\n${fcapPath}`);
+              }
+            } else {
+              const pcapName = fileName.replace(/\.fcap$/i, '') + '.pcap';
+              const pab = new ArrayBuffer(pcap.bytes.byteLength);
+              new Uint8Array(pab).set(pcap.bytes);
+              downloadBlob(
+                new Blob([pab], { type: 'application/vnd.tcpdump.pcap' }),
+                pcapName
+              );
+              showToast(
+                `已导出 .fcap 与 .pcap（写入 ${pcap.written} 帧，跳过 ${pcap.skipped}）`
+              );
+            }
           } catch (pe) {
             const pmsg = pe instanceof Error ? pe.message : String(pe);
-            showToast(`已导出 .fcap；pcap 失败：${pmsg}`);
+            showToast(
+              fcapPath
+                ? `已导出 .fcap；pcap 失败：${pmsg}\n${fcapPath}`
+                : `已导出 .fcap；pcap 失败：${pmsg}`
+            );
           }
           return;
         }
 
-        showToast('已导出真实二进制 .fcap，可直接发给研发重放');
+        showToast(
+          fcapPath
+            ? `已导出真实二进制 .fcap\n${fcapPath}`
+            : '已导出真实二进制 .fcap，可直接发给研发重放'
+        );
         return;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -656,6 +691,19 @@ export default function App() {
         sessionMetadata.sessionTitle?.replace(/\.fcap$/i, '')
         || `现场裁剪_${Date.now()}`;
       const fileName = `${base}_trim_${fromUs}-${toUs}.fcap`;
+
+      if (hasShellIpc()) {
+        const path = await pickAndWriteFcap(bytes, fileName);
+        if (!path) {
+          showToast('已取消另存裁剪');
+          return;
+        }
+        showToast(
+          `已另存裁剪包（${packetCount} 帧，再基 [ ${fromUs}, ${toUs} ]）\n${path}`
+        );
+        return;
+      }
+
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
       downloadBlob(new Blob([ab], { type: 'application/octet-stream' }), fileName);

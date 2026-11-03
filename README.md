@@ -18,6 +18,8 @@ tools\pack_green.bat
 
 **用法**：保持该目录完整，双击 `fieldreplay.exe` 出本机窗口（需 WebView2 Runtime）。自检不开窗：`fieldreplay.exe --smoke`。
 
+录制默认落到壳旁 `record\<日期>\`；「导出现场包 / 另存裁剪」在壳内用原生另存为选定路径（可选同基名旁路 `.pcap`）。
+
 ## 单 EXE 自解压（并行交付，G2）
 
 先有绿色包，再打自解压（不替代绿色目录）：

@@ -35,6 +35,7 @@ import {
 import { ChannelEditorModal } from './ChannelEditorModal';
 import { RecordOutputPathRow } from './RecordOutputPathRow';
 import { requestDefaultRecordPath } from '../shell/recordPath';
+import { hasShellIpc } from '../shell/windowControls';
 
 interface FieldRecorderViewProps {
   channels: ChannelConfig[];
@@ -919,7 +920,7 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                   导出现场捕获数据包 (.fcap)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  包含高精度微秒时间戳、所有通道二进制原始报文，直接发给研发即可还原现场
+                  包含高精度微秒时间戳与各通道原始报文；壳内将弹出另存为选定落盘路径
                 </p>
               </div>
             </div>
@@ -1017,7 +1018,9 @@ export const FieldRecorderView: React.FC<FieldRecorderViewProps> = ({
                 className="px-5 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-sky-600"
               >
                 <Download className="w-3.5 h-3.5" />
-                <span>立即下载 .fcap 数据包</span>
+                <span>
+                  {hasShellIpc() ? '另存为 .fcap' : '下载 .fcap 数据包'}
+                </span>
               </button>
             </div>
           </div>
