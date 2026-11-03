@@ -151,6 +151,16 @@ pub fn pick_save_fcap(suggested_name: Option<&str>) -> io::Result<Option<PathBuf
     Ok(picked.map(|p| ensure_fcap_extension(p)))
 }
 
+/// 弹出打开 `.fcap`；取消返回 `Ok(None)`。初始目录对齐当日 `record\日期`（U12）。
+pub fn pick_open_fcap() -> io::Result<Option<PathBuf>> {
+    let dir = ensure_today_record_dir()?;
+    let picked = rfd::FileDialog::new()
+        .add_filter("FieldReplay 会话", &["fcap"])
+        .set_directory(&dir)
+        .pick_file();
+    Ok(picked)
+}
+
 fn ensure_fcap_extension(path: PathBuf) -> PathBuf {
     match path.extension().and_then(|e| e.to_str()) {
         Some(ext) if ext.eq_ignore_ascii_case("fcap") => path,
@@ -215,5 +225,19 @@ mod tests {
         assert_eq!(p, PathBuf::from("C:\\tmp\\demo.fcap"));
         let keep = ensure_fcap_extension(PathBuf::from("C:\\tmp\\a.FCAP"));
         assert_eq!(keep, PathBuf::from("C:\\tmp\\a.FCAP"));
+    }
+
+    #[test]
+    fn open_dialog_initial_dir_is_today_record() {
+        // 不弹窗；只验 U12 打开对话框依赖的建议目录可创建且含 record\日期
+        let dir = ensure_today_record_dir().expect("应能创建当日 record 目录");
+        let s = path_to_string(&dir);
+        let date = local_date_ymd();
+        assert!(
+            s.contains(&format!("record{}{}", std::path::MAIN_SEPARATOR, date))
+                || s.contains(&format!("record/{date}")),
+            "打开建议目录应含 record\\日期: {s}"
+        );
+        assert!(dir.is_dir());
     }
 }

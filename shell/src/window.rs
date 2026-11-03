@@ -11,7 +11,8 @@ use wry::WebViewBuilder;
 
 use crate::export_io::write_b64;
 use crate::record_paths::{
-    default_record_path, js_escape, path_to_string, pick_save_fcap, suggested_record_file_name,
+    default_record_path, js_escape, path_to_string, pick_open_fcap, pick_save_fcap,
+    suggested_record_file_name,
 };
 
 enum UserEvent {
@@ -19,7 +20,7 @@ enum UserEvent {
     Maximize,
     DragWindow,
     CloseWindow,
-    /// UI 请求默认录制路径、另存为或写入文件；经 evaluate_script 回传。
+    /// UI 请求默认录制路径、另存为/打开或写入文件；经 evaluate_script 回传。
     ShellRpc {
         id: String,
         kind: ShellRpcKind,
@@ -29,6 +30,8 @@ enum UserEvent {
 enum ShellRpcKind {
     DefaultRecordPath,
     PickSaveFcap { suggested: Option<String> },
+    /// 原生打开 `.fcap`（U12）。
+    PickOpenFcap,
     /// 将 base64 载荷写入绝对路径（U11）。
     WriteFile { path: String, b64: String },
 }
@@ -53,6 +56,7 @@ fn load_window_icon() -> Option<Icon> {
 fn parse_shell_rpc(body: &str) -> Option<UserEvent> {
     // 约定：default_record_path|<id>
     //       pick_save_fcap|<id>|<可选建议文件名>
+    //       pick_open_fcap|<id>
     //       write_file|<id>|<绝对路径>|<base64>
     let mut parts = body.splitn(4, '|');
     let cmd = parts.next()?;
@@ -76,6 +80,10 @@ fn parse_shell_rpc(body: &str) -> Option<UserEvent> {
                 kind: ShellRpcKind::PickSaveFcap { suggested },
             })
         }
+        "pick_open_fcap" => Some(UserEvent::ShellRpc {
+            id,
+            kind: ShellRpcKind::PickOpenFcap,
+        }),
         "write_file" => {
             let path = parts.next()?.to_string();
             let b64 = parts.next().unwrap_or("").to_string();
@@ -181,6 +189,10 @@ pub fn run(url: &str, engine: crate::child::EngineChild) -> io::Result<()> {
                             _ => String::new(),
                         }
                     }
+                    ShellRpcKind::PickOpenFcap => match pick_open_fcap() {
+                        Ok(Some(p)) => path_to_string(&p),
+                        _ => String::new(),
+                    },
                     ShellRpcKind::WriteFile {
                         path: dest,
                         b64: payload,
@@ -231,6 +243,20 @@ mod tests {
             } => {
                 assert_eq!(id, "r2");
                 assert_eq!(suggested.as_deref(), Some("demo.fcap"));
+            }
+            _ => panic!("unexpected"),
+        }
+    }
+
+    #[test]
+    fn parse_pick_open_fcap_rpc() {
+        let ev = parse_shell_rpc("pick_open_fcap|r3").expect("parse");
+        match ev {
+            UserEvent::ShellRpc {
+                id,
+                kind: ShellRpcKind::PickOpenFcap,
+            } => {
+                assert_eq!(id, "r3");
             }
             _ => panic!("unexpected"),
         }

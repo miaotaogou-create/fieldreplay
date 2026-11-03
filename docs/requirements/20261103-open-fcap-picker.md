@@ -1,6 +1,6 @@
 # 载入 .fcap 壳内实选文件（U12）
 
-- 状态：已确认（U12a；实现未开始）
+- 状态：进行中（U12a–b 已完成；下一格 U12c）
 - 日期：2026-11-03
 - 依据：U8 缺口 G4「载入其他 .fcap 包」真实选择器未做端到端；U10/U11 已具备壳侧磁盘另存为，打开侧仍依赖 WebView `<input type="file">`，正式交付不完整
 
@@ -72,7 +72,7 @@
 | ID | 任务 | 状态 |
 |----|------|------|
 | U12a | 本文件：范围、验收、非目标、与 U10/U11/`session.open` 关系 | [x] 本文件 |
-| U12b | 壳：原生打开 `.fcap` IPC（建议目录对齐 U10） | [ ] |
+| U12b | 壳：原生打开 `.fcap` IPC（建议目录对齐 U10） | [x] 2026-11-03：`pick_open_fcap` + IPC；UI 桥 `openFcap.ts`；`cargo test`+`--smoke` OK |
 | U12c | UI：重演载入入口接线 `session.open`；无壳降级；手测勾 G4 | [ ] |
 
 ## 后置（不纳入 U12）
@@ -87,4 +87,4 @@
 
 ## 建议下一手
 
-- **U12b**：壳侧 `pick_open_fcap`（或等价）IPC + 建议目录；最小自检 / `--smoke` 不回归
+- **U12c**：重演页「载入其他 .fcap」壳内走 `pickOpenFcapPath` + `session.open`；无壳保留文件输入；手测勾 G4
