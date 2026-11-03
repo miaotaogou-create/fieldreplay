@@ -8,7 +8,9 @@
 // 双击启动不弹控制台；从 cmd/bat 拉起时 stderr 仍可进父控制台（打包 smoke）
 #![windows_subsystem = "windows"]
 
+mod b64;
 mod child;
+mod export_io;
 mod paths;
 mod record_paths;
 mod window;

@@ -1,6 +1,7 @@
 //! 薄壳 WebView2 窗口：无系统边框，自定义标题栏经 IPC 控制。
 
 use std::io;
+use std::path::PathBuf;
 
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
@@ -8,7 +9,7 @@ use tao::window::{Icon, WindowBuilder};
 use wry::http::Request;
 use wry::WebViewBuilder;
 
-use crate::child::EngineChild;
+use crate::export_io::write_b64;
 use crate::record_paths::{
     default_record_path, js_escape, path_to_string, pick_save_fcap, suggested_record_file_name,
 };
@@ -18,7 +19,7 @@ enum UserEvent {
     Maximize,
     DragWindow,
     CloseWindow,
-    /// UI 请求默认录制路径或另存为；经 evaluate_script 回传。
+    /// UI 请求默认录制路径、另存为或写入文件；经 evaluate_script 回传。
     ShellRpc {
         id: String,
         kind: ShellRpcKind,
@@ -28,6 +29,8 @@ enum UserEvent {
 enum ShellRpcKind {
     DefaultRecordPath,
     PickSaveFcap { suggested: Option<String> },
+    /// 将 base64 载荷写入绝对路径（U11）。
+    WriteFile { path: String, b64: String },
 }
 
 /// 从 EXE 嵌入资源加载窗口图标；缺失时回退系统默认（不阻断开窗）。
@@ -50,7 +53,8 @@ fn load_window_icon() -> Option<Icon> {
 fn parse_shell_rpc(body: &str) -> Option<UserEvent> {
     // 约定：default_record_path|<id>
     //       pick_save_fcap|<id>|<可选建议文件名>
-    let mut parts = body.splitn(3, '|');
+    //       write_file|<id>|<绝对路径>|<base64>
+    let mut parts = body.splitn(4, '|');
     let cmd = parts.next()?;
     let id = parts.next()?.to_string();
     if id.is_empty() {
@@ -72,6 +76,17 @@ fn parse_shell_rpc(body: &str) -> Option<UserEvent> {
                 kind: ShellRpcKind::PickSaveFcap { suggested },
             })
         }
+        "write_file" => {
+            let path = parts.next()?.to_string();
+            let b64 = parts.next().unwrap_or("").to_string();
+            if path.is_empty() {
+                return None;
+            }
+            Some(UserEvent::ShellRpc {
+                id,
+                kind: ShellRpcKind::WriteFile { path, b64 },
+            })
+        }
         _ => None,
     }
 }
@@ -85,7 +100,7 @@ fn resolve_script(id: &str, path: &str) -> String {
 }
 
 /// 打开本机无边框窗口并阻塞至用户关闭。关窗时先停引擎。
-pub fn run(url: &str, engine: EngineChild) -> io::Result<()> {
+pub fn run(url: &str, engine: crate::child::EngineChild) -> io::Result<()> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let mut builder = WindowBuilder::new()
         .with_title("FieldReplay")
@@ -166,6 +181,16 @@ pub fn run(url: &str, engine: EngineChild) -> io::Result<()> {
                             _ => String::new(),
                         }
                     }
+                    ShellRpcKind::WriteFile {
+                        path: dest,
+                        b64: payload,
+                    } => {
+                        let p = PathBuf::from(&dest);
+                        match write_b64(&p, &payload) {
+                            Ok(()) => path_to_string(&p),
+                            Err(_) => String::new(),
+                        }
+                    }
                 };
                 if let Some(wv) = webview.as_ref() {
                     let _ = wv.evaluate_script(&resolve_script(&id, &path));
@@ -174,4 +199,40 @@ pub fn run(url: &str, engine: EngineChild) -> io::Result<()> {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_write_file_rpc() {
+        let ev = parse_shell_rpc("write_file|r1|C:\\tmp\\a.fcap|RkNBUA==").expect("parse");
+        match ev {
+            UserEvent::ShellRpc {
+                id,
+                kind: ShellRpcKind::WriteFile { path, b64 },
+            } => {
+                assert_eq!(id, "r1");
+                assert_eq!(path, "C:\\tmp\\a.fcap");
+                assert_eq!(b64, "RkNBUA==");
+            }
+            _ => panic!("unexpected"),
+        }
+    }
+
+    #[test]
+    fn parse_pick_save_still_works() {
+        let ev = parse_shell_rpc("pick_save_fcap|r2|demo.fcap").expect("parse");
+        match ev {
+            UserEvent::ShellRpc {
+                id,
+                kind: ShellRpcKind::PickSaveFcap { suggested },
+            } => {
+                assert_eq!(id, "r2");
+                assert_eq!(suggested.as_deref(), Some("demo.fcap"));
+            }
+            _ => panic!("unexpected"),
+        }
+    }
 }
