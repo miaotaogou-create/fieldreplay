@@ -1,0 +1,21 @@
+[package]
+name = "fieldreplay-sfx"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "FieldReplay 自解压启动器：展开绿包等价布局后拉起壳"
+build = "build.rs"
+
+[[bin]]
+name = "fieldreplay-sfx"
+path = "src/main.rs"
+
+[dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1

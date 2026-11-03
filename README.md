@@ -18,6 +18,21 @@ tools\pack_green.bat
 
 **用法**：保持该目录完整，双击 `fieldreplay.exe` 出本机窗口（需 WebView2 Runtime）。自检不开窗：`fieldreplay.exe --smoke`。
 
+## 单 EXE 自解压（并行交付，G2）
+
+先有绿色包，再打自解压（不替代绿色目录）：
+
+```bat
+tools\pack_green.bat
+tools\pack_sfx.bat
+```
+
+或一步：`tools\pack_sfx.bat -PackGreen`。
+
+产物：`pack\FieldReplay.exe`（单个文件）。双击后展开到同级 `FieldReplay\`（不可写则 `%LOCALAPPDATA%\FieldReplay\`），再启动其中的壳；同版本再次双击会跳过整包解压。规格见 `docs/requirements/20261103-single-exe-sfx.md`。
+
+说明：自解压形态易被杀软误报，若被拦截可改发绿色目录。
+
 ## 本机窗口（开发期）
 
 ```bat

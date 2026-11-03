@@ -22,6 +22,7 @@ engine/build/
 engine/out/
 engine/target/
 shell/target/
+sfx/target/
 *.obj
 *.pdb
 *.exe

@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **G2b** 绿包→单 EXE 自解压产物；规格 `docs/requirements/20261103-single-exe-sfx.md`；其后 **U11** 导出改保存位置；E15 仍搁置 |
+| **下一步** | **G2c** 自解压启动手测（解压/版本复用/回退/失败提示）；规格 `docs/requirements/20261103-single-exe-sfx.md`；其后 **U11**；E15 仍搁置 |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -181,7 +181,7 @@ fieldreplay/
 | D **E16** 录制暂停 | — | 相对戳冻结；引擎+UI+多路自检 | **已收口** |
 | E **R1** 回归 | — | R1a 通过；R1b 无缺陷跳过 | **已收口** |
 | F **R2** 控制面 multi targets WS | — | 补 R1 残留：`targets[]` 环回自检 | **已收口** |
-| G **交付抛光** | G2b | 单 EXE 自解压 | **当前主线**（G2a 已入库；其后 U11 导出改路径） |
+| G **交付抛光** | G2c | 单 EXE 自解压 | **当前主线**（G2b 已收口；其后 U11 导出改路径） |
 | H **U10** 录制落盘 | — | EXE\record\日期 可见/可选 | **已收口**（U10a–c） |
 
 #### U10 录制落盘路径
@@ -204,7 +204,7 @@ fieldreplay/
 | ID | 任务 | 状态 | 完成记录 |
 |----|------|------|----------|
 | G2a | 需求入库（单 EXE；绿包并存；解压同级/回退 LocalAppData） | [x] | 2026-11-03：`docs/requirements/20261103-single-exe-sfx.md`；D-036；其后排期 U11 |
-| G2b | 打包：绿包 → 单 EXE 自解压产物（可重复脚本） | [ ] | |
+| G2b | 打包：绿包 → 单 EXE 自解压产物（可重复脚本） | [x] | 2026-11-03：`sfx/` 启动器 + `tools/pack_sfx` → `pack/FieldReplay.exe`；`--self-check` 过 |
 | G2c | 启动：解压/版本复用/回退/失败提示 + 手测勾验收 | [ ] | |
 
 #### U11 导出改保存位置（已排期，未开）
@@ -265,18 +265,19 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **当前主线 G2b**（绿包→单 EXE）；规格 `docs/requirements/20261103-single-exe-sfx.md`；其后 **U11**；**E15** 仍搁置
+1. 读 `PROGRESS.md` → **当前主线 G2c**（自解压启动手测）；规格 `docs/requirements/20261103-single-exe-sfx.md`；其后 **U11**；**E15** 仍搁置
 2. 做完勾选、填完成记录、提交推送；一次对话默认只接一格
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2a** 已收口；G2b 进行中；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2a** / **G2b** 已收口；G2c 进行中；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
-5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
+5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`；或 `tools\pack_sfx.bat` → 双击 `pack\FieldReplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
 7. 引擎自检：`cd engine && cargo test && cargo run -- self-check`
 8. **壳冒烟**：先 `engine` build + `ui` `npm run build`；再 `cd shell && cargo run -- --smoke`；开窗口：`cargo run`（需 WebView2 Runtime）
 9. **绿色打包**：`tools\pack_green.bat` → `pack\FieldReplay\`（含 `--smoke`）
-10. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～7 已过；闸门 `07_run_aligned_replay.bat`
-11. **U9 已收口**：通道卡片右键编辑/删除
-12. **假上位机口**：UDP `56101` / TCP `58102` / MQTT `e2e/#`（录制侧仍为 `56001`/`58002`）
+10. **自解压打包**：`tools\pack_sfx.bat` → `pack\FieldReplay.exe`（含 `--self-check`）
+11. **E2E 夹具**：`tools/e2e_lab/`；E2E-1～7 已过；闸门 `07_run_aligned_replay.bat`
+12. **U9 已收口**：通道卡片右键编辑/删除
+13. **假上位机口**：UDP `56101` / TCP `58102` / MQTT `e2e/#`（录制侧仍为 `56001`/`58002`）
 
 ## 决策记录（追加）
 
@@ -342,3 +343,4 @@ fieldreplay/
 | 2026-11-03 | U10b 收口：壳默认路径 + 另存为 IPC | `record_paths`；IPC `default_record_path`/`pick_save_fcap`；UI 桥 `recordPath.ts`；下一格 U10c |
 | 2026-11-03 | U10c / U10 全轨收口 | `RecordOutputPathRow`；开录必传 `out`；录中只读；停录展示实际路径；无默认下一主线 |
 | 2026-11-03 | **选定 G2** 单 EXE 自解压；其后 **U11** 导出改路径；G2a 需求入库 | 绿包并存；解压优先同级 `FieldReplay\`，回退 LocalAppData；见 `20261103-single-exe-sfx.md`；下一格 G2b |
+| 2026-11-03 | G2b 收口：绿包→单 EXE 打包脚本 | `sfx/` 薄启动器；`tools/pack_sfx` 追加 zip+版本尾；产物 `pack/FieldReplay.exe`；下一格 G2c 手测 |
