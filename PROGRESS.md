@@ -24,8 +24,8 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **U12** 载入 .fcap 壳内实选（U12b 已收口；下一格 U12c）；**E15** 仍搁置 |
-| **U12** | 载入 .fcap 实选 | **进行中**（U12a–b；见 `20261103-open-fcap-picker.md`） |
+| **下一步** | **无默认主线**（U12 已收口）；现场再选；**E15** 仍搁置 |
+| **U12** | 载入 .fcap 实选 | **已收口**（U12a–c；见 `20261103-open-fcap-picker.md`；U8 G4 已消） |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -105,7 +105,7 @@ fieldreplay/
 | **缺口 G1** | 已消 | 样本/类型注释去「Qt 上位机」口吻；`hostComPort` 替代 `qtTargetPort` |
 | **缺口 G2** | 已消 | `docs/design/fcap-format.md` 已定稿（E0） |
 | **缺口 G3** | 已消 | 清空与新开引擎录制均复位会话元数据 |
-| **缺口 G4** | 未测深 | 「载入其他 .fcap 包」真实文件选择器未做端到端（mock 阶段可后补） |
+| **缺口 G4** | 已消 | U12：壳内原生打开 + `session.open`（见 `20261103-open-fcap-picker.md`） |
 | **非本阶段** | — | 真实 UDP/串口/TCP/MQTT IO、二进制 `.fcap`、单入口打包 |
 
 **结论**：界面阶段 **通过**，可进入阶段 E；G1/G3 为文案/状态抛光，不阻塞开引擎。
@@ -185,7 +185,7 @@ fieldreplay/
 | G **交付抛光** | G2 | 单 EXE 自解压 | **已收口**（G2a–G2c） |
 | H **U10** 录制落盘 | — | EXE\record\日期 可见/可选 | **已收口**（U10a–c） |
 | I **U11** 导出改路径 | — | 导出现场包/裁剪另存磁盘路径 | **已收口**（U11a–c） |
-| J **U12** 载入 .fcap 实选 | U12c | 壳内原生打开；`session.open`；消 U8 G4 | **进行中**（U12a–b 已收口） |
+| J **U12** 载入 .fcap 实选 | — | 壳内原生打开；`session.open`；消 U8 G4 | **已收口**（U12a–c） |
 
 #### U10 录制落盘路径
 
@@ -224,7 +224,7 @@ fieldreplay/
 |----|------|------|----------|
 | U12a | 需求入库（原生打开；`session.open`；消 G4；非目标） | [x] | 2026-11-03：`docs/requirements/20261103-open-fcap-picker.md`；D-042 |
 | U12b | 壳：原生打开 `.fcap` IPC（建议目录对齐 U10） | [x] | 2026-11-03：`pick_open_fcap` + IPC；UI 桥 `openFcap.ts`；`cargo test`+`--smoke` OK |
-| U12c | UI：重演载入入口接线 + 无壳降级 + 手测勾 G4 | [ ] | |
+| U12c | UI：重演载入入口接线 + 无壳降级 + 手测勾 G4 | [x] | 2026-11-03：`openSession`；重演页壳内 `pickOpenFcapPath`→`session.open`；无壳仍文件输入；`npm run lint/build`+壳 `--smoke` OK；`session.open` WS 样例过 |
 
 #### E13 会话 trim + marker
 
@@ -278,9 +278,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **当前主线 U12**（U12b 已收口；下一格 **U12c**）；**E15** 仍搁置
+1. 读 `PROGRESS.md` → **无默认主线**（U12 已收口）；**E15** 仍搁置；现场再选下一条
 2. 做完勾选、填完成记录、提交推送；一次对话默认只接一格
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2** / **U11** 已收口；U12 进行中见 `20261103-open-fcap-picker.md`；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10** / **G2** / **U11** / **U12** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`；或 `tools\pack_sfx.bat` → 双击 `pack\FieldReplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -363,3 +363,4 @@ fieldreplay/
 | 2026-11-03 | U11c / U11 全轨收口 | 导出现场包/pcap/裁剪另存走壳另存为+`write_file`；取消不落盘；toast 含路径；无默认主线 |
 | 2026-11-03 | **选定 U12**；U12a 需求入库 | 载入 .fcap 壳内原生打开；正式 `session.open`；消 U8 G4；见 `20261103-open-fcap-picker.md`；下一格 U12b；E15 仍搁置 |
 | 2026-11-03 | U12b 收口：壳原生打开 IPC | `pick_open_fcap`；IPC `pick_open_fcap|<id>`；`openFcap.ts`；下一格 U12c |
+| 2026-11-03 | U12c / U12 全轨收口；U8 G4 已消 | `EngineClient.openSession`；重演页壳内原生打开+`session.open`；无壳降级；无默认主线；E15 仍搁置 |

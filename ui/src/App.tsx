@@ -713,6 +713,30 @@ export default function App() {
     }
   };
 
+  /** U12c：壳内原生打开得到路径后走 `session.open`。 */
+  const handleOpenFcapPath = async (path: string) => {
+    const engine = engineRef.current;
+    if (!engine?.connected) {
+      showToast('未连引擎：无法按路径打开 .fcap');
+      return;
+    }
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    try {
+      const dto = await engine.openSession(trimmed);
+      const mapped = mapEngineSession(dto);
+      setSessionMetadata(mapped.metadata);
+      setRecordedPackets(mapped.packets);
+      showToast(
+        `已通过引擎载入：${mapped.metadata.sessionTitle}（${mapped.packets.length} 帧）\n${trimmed}`
+      );
+    } catch (e) {
+      showToast(
+        `引擎载入失败：${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  };
+
   const handleLoadCaptureFile = async (file: File) => {
     const engine = engineRef.current;
     const lower = file.name.toLowerCase();
@@ -860,6 +884,7 @@ export default function App() {
             packets={recordedPackets}
             onUploadSession={handleUploadSession}
             onLoadCaptureFile={handleLoadCaptureFile}
+            onOpenFcapPath={handleOpenFcapPath}
             onPcapImportNeedEngine={() =>
               showToast('未连引擎：不会本地假导入 .pcap，请先连接引擎')
             }

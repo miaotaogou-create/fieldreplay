@@ -32,6 +32,7 @@ import {
   Activity,
   ExternalLink,
 } from 'lucide-react';
+import { hasShellIpc, pickOpenFcapPath } from '../shell/openFcap';
 
 export type EngineStartReplayRequest =
   | {
@@ -57,6 +58,8 @@ interface DevReplayerViewProps {
   onUploadSession: (metadata: CaptureSessionMetadata, packets: CapturedPacket[]) => void;
   /** 优先走引擎解析真实二进制 .fcap / 经典 .pcap；未连引擎时可回落 JSON 演示包 */
   onLoadCaptureFile?: (file: File) => void | Promise<void>;
+  /** U12c：壳内原生打开后按磁盘路径 `session.open`；无壳不调用 */
+  onOpenFcapPath?: (path: string) => void | Promise<void>;
   /** 未连引擎时点「导入 .pcap」的提示（由 App toast） */
   onPcapImportNeedEngine?: () => void;
   onSelectPacketForInspection: (packet: CapturedPacket) => void;
@@ -96,6 +99,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
   packets,
   onUploadSession,
   onLoadCaptureFile,
+  onOpenFcapPath,
   onPcapImportNeedEngine,
   onSelectPacketForInspection,
   engineConnected = false,
@@ -552,6 +556,20 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
     reader.readAsText(file);
   };
 
+  /** 壳内：原生打开 + 路径打开；无壳：隐藏文件输入（可含 JSON 演示）。 */
+  const openFcapPicker = () => {
+    if (hasShellIpc() && onOpenFcapPath) {
+      void (async () => {
+        const path = await pickOpenFcapPath();
+        if (!path) return;
+        await Promise.resolve(onOpenFcapPath(path));
+        applyLoadedCapture();
+      })();
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
   const handlePcapUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -627,7 +645,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
               />
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openFcapPicker}
                 className="px-2.5 py-1 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors flex items-center gap-1.5"
               >
                 <Upload className="w-3.5 h-3.5" />
@@ -683,7 +701,7 @@ export const DevReplayerView: React.FC<DevReplayerViewProps> = ({
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={openFcapPicker}
                 className="px-2.5 py-1 text-xs font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md"
               >
                 载入 .fcap

@@ -166,6 +166,11 @@ export class EngineClient {
     });
   }
 
+  /** 按磁盘绝对路径打开 `.fcap`（U12；控制面 `session.open`）。 */
+  openSession(path: string): Promise<EngineSessionDto> {
+    return this.request<EngineSessionDto>('session.open', { path });
+  }
+
   clearSession(): Promise<void> {
     return this.request('session.clear', {}).then(() => undefined);
   }
