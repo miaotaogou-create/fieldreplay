@@ -24,7 +24,7 @@
 | `shell/` 薄壳 | **E6b 已落地**：wry WebView2；启动拉起引擎；`--smoke` 自检通过 |
 | 绿色目录 | **E6c+E6d**：`tools/pack_green.bat` → `pack/FieldReplay/`；双击手测通过 |
 | GitHub 开源仓 | 已建：https://github.com/miaotaogou-create/fieldreplay |
-| **下一步** | **无默认主线**；G1 已收口；是否开 **G2**（README/手测入口等）现场再选定；E15 仍搁置 |
+| **下一步** | **U10c** 录制页路径行 + 传 `out`；规格 `docs/requirements/20261103-record-output-path.md`；U10b 已收口；E15 仍搁置；单 EXE 后置 |
 | **U9** | 录制通道卡片右键编辑/删除 | **已收口**（`20261102-channel-card-context-menu.md`） |
 | IA / 标题栏 | **已改**：去掉「对接说明」Tab；壳无边框 + 自定义标题栏；去掉「x64 · 无边框窗体」 |
 | 界面密度 | **已改**：`fr-page` 主区吃满窗口高度；监视/列表面板 `flex-1`；矮屏压间距；最大化优先无整页竖滚 |
@@ -182,6 +182,15 @@ fieldreplay/
 | E **R1** 回归 | — | R1a 通过；R1b 无缺陷跳过 | **已收口** |
 | F **R2** 控制面 multi targets WS | — | 补 R1 残留：`targets[]` 环回自检 | **已收口** |
 | G **交付抛光** | G1 | 壳任务栏/Alt+Tab/EXE 图标 | **G1 已收口**；G2 未开 |
+| H **U10** 录制落盘 | U10c | EXE\record\日期 可见/可选 | **当前主线**（U10b 已收口） |
+
+#### U10 录制落盘路径
+
+| ID | 任务 | 状态 | 完成记录 |
+|----|------|------|----------|
+| U10a | 需求入库（默认 EXE\record\日期；可见/可选；非目标） | [x] | 2026-11-03：`docs/requirements/20261103-record-output-path.md`；D-033 |
+| U10b | 壳：默认路径 + 另存为 IPC | [x] | 2026-11-03：`record_paths` + IPC `default_record_path`/`pick_save_fcap`；UI 桥 `recordPath.ts`；单元测+`--smoke` OK |
+| U10c | UI：路径行 + 传 `out` + 录中只读 | [ ] | |
 
 #### G1 壳应用图标
 
@@ -243,9 +252,9 @@ fieldreplay/
 
 ## 新会话接续提示（给协作者 / Agent）
 
-1. 读 `PROGRESS.md` → **无默认主线**（G1 已收口）；是否开 **G2** 或其它备选现场再选定；**E15** 仍搁置
+1. 读 `PROGRESS.md` → **当前主线 U10c**（录制页路径行 + `out`）；规格 `docs/requirements/20261103-record-output-path.md`；**E15** 仍搁置；单 EXE 后置
 2. 做完勾选、填完成记录、提交推送；一次对话默认只接一格
-3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** 已收口；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
+3. 界面 U / 引擎 E5 / **打包 E6** / 重放增强与 **E7 视频** / 增强项 **E8–E14** / **R1** / **E16** / **R2** / E2E Lab / **G1** / **U10b** 已收口；U10c 进行中；`.fcap` 见 `docs/design/fcap-format.md`；引擎语言 **Rust**（决策 14）；壳选型见决策 15；**E15** 搁置待客户 mTLS 场景
 4. 工作目录：`C:\ZYL\workspace\projects\fieldreplay`
 5. **交付用法**：`tools\pack_green.bat` → 双击 `pack\FieldReplay\fieldreplay.exe`（需 WebView2 Runtime）
 6. **开发预览**（非交付）：终端 A `cd engine && cargo run -- serve`；终端 B `cd ui && npm run dev`；或 `serve --ui-dir ../ui/dist` 后浏览器开 `http://127.0.0.1:17890/`（仍非交付）
@@ -316,3 +325,5 @@ fieldreplay/
 | 2026-11-02 | E2E-7 重演→假上位机收口；E2E Lab 全轨过 | `07_run_aligned_replay`：WS targets[] UDP/MQTT/TCP；STAT/LASER/SENSOR PASS；无默认下一主线 |
 | 2026-11-02 | **选定 G 交付抛光**；G1a 需求入库 | 任务栏/Alt+Tab/壳 EXE 图标；见 `20261102-shell-app-icon.md`；下一格 G1b；E15 仍搁置 |
 | 2026-11-02 | G1b / G1 收口 | `shell/assets/fieldreplay.ico`；winres 嵌入 EXE；窗口 `from_resource(1)`；`pack_green` 通过；无默认主线（G2 未开） |
+| 2026-11-03 | **选定 U10**；U10a 需求入库 | 默认 `{壳EXE}\record\YYYY-MM-DD\`；见 `20261103-record-output-path.md`；下一格 U10b；单 EXE/导出改路径后置 |
+| 2026-11-03 | U10b 收口：壳默认路径 + 另存为 IPC | `record_paths`；IPC `default_record_path`/`pick_save_fcap`；UI 桥 `recordPath.ts`；下一格 U10c |

@@ -10,6 +10,7 @@
 
 mod child;
 mod paths;
+mod record_paths;
 mod window;
 
 use std::env;

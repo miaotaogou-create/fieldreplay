@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 tao = "0.34"
 wry = "0.53"
+rfd = "0.15"
 
 [build-dependencies]
 winres = "0.1"
